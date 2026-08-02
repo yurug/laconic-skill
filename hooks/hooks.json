@@ -1,0 +1,36 @@
+{
+  "description": "Injects the laconic policy and knowledge index into sessions and subagents, and checks model maintenance at end of turn",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/inject-policy.sh\" SessionStart"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/inject-policy.sh\" SubagentStart"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/stop-check.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

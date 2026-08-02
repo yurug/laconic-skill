@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>laconic · model console</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --paper:#FBFBFC; --ink:#15181B; --muted:#5E6570; --faint:#E5E8EC; --card:#FFFFFF; --card2:#F1F3F5;
+    --accent:#2F6F7E; --accent-quiet:#4E8896; --danger:#9E4B45;
+    --s-unknown:#B7BDC4; --s-exposed:#8FB2B6; --s-familiar:#4E8896; --s-verified:#2F6F7E;
+    --mono:ui-monospace,"SF Mono",Menlo,"Cascadia Code","Roboto Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --shadow:0 1px 2px rgba(20,30,40,.05),0 2px 8px rgba(20,30,40,.04);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --paper:#0F1214; --ink:#E8EBED; --muted:#8B939C; --faint:#242A2F; --card:#161A1E; --card2:#1B2025;
+    --accent:#5AB2C2; --accent-quiet:#4A93A2; --danger:#D98A82;
+    --s-unknown:#3B424A; --s-exposed:#4C7A80; --s-familiar:#4F9FAE; --s-verified:#6FC7D6;
+    --shadow:0 1px 2px rgba(0,0,0,.3);
+  }}
+  :root[data-theme="dark"]{
+    --paper:#0F1214; --ink:#E8EBED; --muted:#8B939C; --faint:#242A2F; --card:#161A1E; --card2:#1B2025;
+    --accent:#5AB2C2; --accent-quiet:#4A93A2; --danger:#D98A82;
+    --s-unknown:#3B424A; --s-exposed:#4C7A80; --s-familiar:#4F9FAE; --s-verified:#6FC7D6;
+    --shadow:0 1px 2px rgba(0,0,0,.3);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:clamp(1.4rem,4vw,2.6rem) clamp(1rem,3vw,1.8rem) 4rem}
+  a{color:var(--accent)}
+
+  header h1{font-family:var(--mono);font-weight:600;font-size:1.5rem;letter-spacing:-.01em;margin:0}
+  header h1 .d{color:var(--accent)}
+  .tag{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--accent-quiet);margin:0 0 .5rem}
+  .intro{color:var(--muted);max-width:60ch;margin:.7rem 0 0;font-size:.92rem}
+  .intro b{color:var(--ink)}
+
+  .bar{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin:1.4rem 0 .4rem}
+  .count{font-family:var(--mono);font-size:.75rem;padding:.2em .6em;border-radius:20px;
+    background:var(--card2);color:var(--muted);display:inline-flex;gap:.4em;align-items:center}
+  .count .sw{width:.6em;height:.6em;border-radius:50%}
+  .msg{margin-left:auto;font-family:var(--mono);font-size:.78rem;color:var(--accent-quiet);
+    min-height:1.2em;transition:opacity .3s}
+
+  h2.sec{font-family:var(--mono);font-size:.82rem;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--muted);margin:2.2rem 0 .9rem;padding-bottom:.5rem;border-bottom:1px solid var(--faint)}
+
+  .grid{display:grid;gap:.9rem;
+    grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))}
+
+  .cardc{background:var(--card);border:1px solid var(--faint);border-radius:12px;
+    padding:1rem 1.05rem;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:.55rem}
+  .chead{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap}
+  .cid{font-family:var(--mono);font-weight:600;font-size:.95rem;word-break:break-word}
+  .dom{font-family:var(--mono);font-size:.68rem;color:var(--muted);background:var(--card2);
+    padding:.12em .5em;border-radius:20px}
+  .pill{margin-left:auto;font-family:var(--mono);font-size:.68rem;font-weight:600;text-transform:uppercase;
+    letter-spacing:.05em;padding:.22em .6em;border-radius:20px;color:#fff;white-space:nowrap}
+  .pill.unknown{background:var(--s-unknown);color:#15181B}
+  .pill.exposed{background:var(--s-exposed);color:#15181B}
+  .pill.familiar{background:var(--s-familiar)}
+  .pill.verified{background:var(--s-verified)}
+  :root[data-theme="dark"] .pill.unknown,:root[data-theme="dark"] .pill.exposed{color:#0F1214}
+  @media (prefers-color-scheme:dark){.pill.unknown,.pill.exposed{color:#0F1214}}
+
+  .summary{font-size:.9rem;color:var(--ink)}
+  .summary.empty{color:var(--muted);font-style:italic}
+  .conf{font-family:var(--mono);font-size:.72rem;color:var(--muted)}
+  .why{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:.3rem}
+  .why li{font-size:.8rem;color:var(--muted);padding-left:.9rem;position:relative;line-height:1.4}
+  .why li::before{content:"·";position:absolute;left:.2rem;color:var(--accent-quiet)}
+  .why .date{font-family:var(--mono);color:var(--accent-quiet)}
+
+  .actions{display:flex;gap:.45rem;flex-wrap:wrap;margin-top:.2rem;padding-top:.55rem;border-top:1px solid var(--faint)}
+  button{font-family:var(--sans);font-size:.8rem;cursor:pointer;border-radius:7px;
+    border:1px solid var(--faint);background:var(--card2);color:var(--ink);padding:.4em .7em;transition:.12s}
+  button:hover{border-color:var(--accent-quiet)}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button.link{border:0;background:none;color:var(--accent);padding:.4em .2em}
+  button.danger{color:var(--danger)}
+
+  .correct{display:none;flex-direction:column;gap:.55rem;margin-top:.3rem;
+    background:var(--card2);border-radius:9px;padding:.75rem .8rem}
+  .correct.open{display:flex}
+  .correct .lbl{font-size:.76rem;color:var(--muted)}
+  .states{display:flex;gap:.3rem;flex-wrap:wrap}
+  .states .s{flex:1 1 auto;text-align:center;font-family:var(--mono);font-size:.72rem;
+    padding:.4em .3em;border-radius:6px;border:1px solid var(--faint);background:var(--card);cursor:pointer}
+  .states .s.sel{border-color:var(--accent);background:var(--accent);color:#fff}
+  .correct input,.correct textarea{width:100%;font-family:var(--sans);font-size:.82rem;
+    border:1px solid var(--faint);border-radius:6px;padding:.45em .6em;background:var(--card);color:var(--ink)}
+  .correct .rowb{display:flex;gap:.4rem;justify-content:flex-end}
+  .edit{display:none;gap:.4rem;margin-top:.3rem}
+  .edit.open{display:flex;flex-wrap:wrap}
+  .edit input{flex:1 1 8rem;font-size:.8rem;border:1px solid var(--faint);border-radius:6px;
+    padding:.35em .5em;background:var(--card);color:var(--ink)}
+  .empty-state{color:var(--muted);font-size:.95rem;padding:2rem 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="tag">laconic<span class="d">.</span> · model console</p>
+    <h1>What laconic thinks you know</h1>
+    <p class="intro">Every card is an <b>inference</b> the model made from your conversations, with the evidence for it. Review it, and <b>correct what's wrong</b> — promote something it underrates, demote something it overrates, fix a domain, or delete a bad guess. This is for correcting specific claims, <b>not for rating yourself</b>: the model learns from what you do, and self-ratings don't predict understanding.</p>
+  </header>
+
+  <div class="bar" id="bar"></div>
+  <div id="content"></div>
+</div>
+
+<script>
+const STATE_COLORS={unknown:"var(--s-unknown)",exposed:"var(--s-exposed)",familiar:"var(--s-familiar)",verified:"var(--s-verified)"};
+let MODEL={concepts:[],states:["unknown","exposed","familiar","verified"]};
+
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function load(){
+  const r=await fetch("/api/model"); MODEL=await r.json(); render();
+}
+function flash(t){const m=document.querySelector(".msg");if(m){m.textContent=t;m.style.opacity=1;setTimeout(()=>m.style.opacity=0,2200);}}
+
+async function post(path,body){
+  const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const j=await r.json(); if(!j.ok){flash("✗ "+(j.message||j.error||"failed"));return false;}
+  flash("✓ "+(j.message||"done")); await load(); return true;
+}
+
+function splitEvidence(e){const m=String(e).match(/^(\d{4}-\d{2}-\d{2}):?\s*(.*)$/);return m?[m[1],m[2]]:["",e];}
+
+function card(c){
+  const why=c.evidence.map(e=>{const[d,t]=splitEvidence(e);
+    return `<li>${d?`<span class="date">${esc(d)}</span> `:""}${esc(t)}</li>`;}).join("")
+    || `<li>no evidence recorded</li>`;
+  const states=MODEL.states.map(s=>`<div class="s${s===c.state?" sel":""}" data-s="${s}">${s}</div>`).join("");
+  return `<div class="cardc" data-id="${esc(c.id)}">
+    <div class="chead">
+      <span class="cid">${esc(c.id)}</span>
+      <span class="dom">${esc(c.domain)}</span>
+      <span class="pill ${c.state}">${c.state}</span>
+    </div>
+    <div class="summary${c.summary?"":" empty"}">${esc(c.summary||"no summary yet")}</div>
+    <div class="conf">confidence ${(c.confidence).toFixed(2)}${c.last_updated?" · "+esc(c.last_updated):""}</div>
+    <ul class="why">${why}</ul>
+    <div class="actions">
+      <button class="link" data-act="correct">Correct…</button>
+      <button class="link" data-act="edit">Domain / summary</button>
+      <button class="link danger" data-act="delete">Delete</button>
+    </div>
+    <div class="correct">
+      <div class="lbl">What's the right state?</div>
+      <div class="states">${states}</div>
+      <input class="ev" placeholder="Why? e.g. I've used this in production for years" />
+      <div class="rowb"><button data-act="cancel-c">Cancel</button><button data-act="save-c">Save correction</button></div>
+    </div>
+    <div class="edit">
+      <input class="edom" placeholder="domain" value="${esc(c.domain)}" />
+      <input class="esum" placeholder="one-line summary" value="${esc(c.summary)}" />
+      <button data-act="save-e">Save</button>
+    </div>
+  </div>`;
+}
+
+function section(title,items){
+  if(!items.length)return "";
+  return `<h2 class="sec">${esc(title)} <span style="color:var(--accent-quiet)">${items.length}</span></h2>
+    <div class="grid">${items.map(card).join("")}</div>`;
+}
+
+function render(){
+  const cs=MODEL.concepts;
+  // summary bar
+  const counts={};MODEL.states.forEach(s=>counts[s]=0);cs.forEach(c=>counts[c.state]=(counts[c.state]||0)+1);
+  document.getElementById("bar").innerHTML=
+    `<span class="count">${cs.length} concepts</span>`+
+    MODEL.states.slice().reverse().map(s=>`<span class="count"><span class="sw" style="background:${STATE_COLORS[s]}"></span>${s} ${counts[s]||0}</span>`).join("")+
+    `<span class="msg"></span>`;
+
+  if(!cs.length){document.getElementById("content").innerHTML=`<p class="empty-state">The model is empty. It fills as your conversations reveal what you know — nothing to review yet.</p>`;return;}
+
+  // "worth reviewing": least established / least confident first
+  const rank={unknown:0,exposed:1,familiar:2,verified:3};
+  const review=cs.filter(c=>c.state==="unknown"||c.state==="exposed")
+    .sort((a,b)=>a.confidence-b.confidence).slice(0,8);
+  const reviewIds=new Set(review.map(c=>c.id));
+  const rest=cs.filter(c=>!reviewIds.has(c.id));
+  // group rest by domain
+  const byDom={};rest.forEach(c=>(byDom[c.domain]=byDom[c.domain]||[]).push(c));
+  const domHtml=Object.keys(byDom).sort((a,b)=>byDom[b].length-byDom[a].length)
+    .map(d=>section(d,byDom[d].sort((a,b)=>rank[b.state]-rank[a.state]))).join("");
+
+  document.getElementById("content").innerHTML=
+    section("Worth reviewing — least established first",review)+domHtml;
+}
+
+document.addEventListener("click",async e=>{
+  const b=e.target.closest("button");if(!b)return;
+  const cardEl=e.target.closest(".cardc");if(!cardEl)return;
+  const id=cardEl.dataset.id, act=b.dataset.act;
+  const cor=cardEl.querySelector(".correct"), ed=cardEl.querySelector(".edit");
+  if(act==="correct"){cor.classList.toggle("open");ed.classList.remove("open");}
+  else if(act==="edit"){ed.classList.toggle("open");cor.classList.remove("open");}
+  else if(act==="cancel-c"){cor.classList.remove("open");}
+  else if(act==="save-c"){
+    const sel=cardEl.querySelector(".states .s.sel");
+    const state=sel?sel.dataset.s:null;
+    const ev=cardEl.querySelector(".ev").value.trim();
+    if(!state)return flash("pick a state");
+    if(!ev)return flash("give a reason — never invent evidence");
+    const confirmed=(state==="verified");
+    await post("/api/record",{id,state,evidence:"console correction: "+ev,confirmed});
+  }
+  else if(act==="save-e"){
+    await post("/api/edit",{id,domain:cardEl.querySelector(".edom").value.trim(),summary:cardEl.querySelector(".esum").value.trim()});
+  }
+  else if(act==="delete"){
+    if(confirm(`Delete "${id}"? This removes the inference and commits the deletion.`))
+      await post("/api/delete",{id});
+  }
+});
+document.addEventListener("click",e=>{
+  const s=e.target.closest(".states .s");if(!s)return;
+  s.parentElement.querySelectorAll(".s").forEach(x=>x.classList.remove("sel"));
+  s.classList.add("sel");
+});
+
+load();
+</script>
+</body>
+</html>

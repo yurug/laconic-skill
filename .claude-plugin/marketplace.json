@@ -1,0 +1,19 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "nomadic-labs",
+  "description": "Nomadic Labs Claude Code plugins",
+  "owner": {
+    "name": "Nomadic Labs"
+  },
+  "plugins": [
+    {
+      "name": "laconic",
+      "description": "Cuts noise from agent communication. Maintains an auditable model of what you already know, and uses it to decide what to leave out.",
+      "author": {
+        "name": "Yann Régis-Gianas"
+      },
+      "category": "productivity",
+      "source": "./"
+    }
+  ]
+}

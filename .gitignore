@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+
+# Local working notes, not part of the released plugin
+SESSION_STATE.md
+feedback.md
+
+# Mined from real transcripts: work material, local only.
+eval/corpus.jsonl
+eval/corpus-final.jsonl
+eval/relevance.jsonl
+eval/theory-corpus.jsonl
+eval/runs/

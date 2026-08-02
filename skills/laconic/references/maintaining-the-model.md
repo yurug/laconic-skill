@@ -1,0 +1,208 @@
+# Maintaining the knowledge model
+
+Load this only for model work — recording evidence, distilling, forgetting, or auditing
+`~/.laconic/`. Writing a document needs the states and the injected policy, not this file.
+
+The user-facing description of the same model lives in `docs/knowledge-model.md` in the
+laconic repository. This file is the operations manual.
+
+## The command
+
+```bash
+~/.laconic/bin/laconic-record <id> --state <unknown|exposed|familiar|verified> \
+    --domain <subject> --evidence "what you saw"
+```
+
+That path is identical whether laconic was installed as a plugin or as a bare skill —
+`~/.laconic` is the one location both modes share. The wrappers are regenerated on every
+session start, so they heal if the checkout moves.
+
+Write **only** through the tool. It enforces the schema, regenerates `~/.laconic/INDEX.md`
+(the human-readable view, grouped by domain), and commits each change so a wrong inference is
+visible and revertible. Hand-written files produced freeform notes the index silently
+ignored, which is why the schema lives in the tool rather than in prose.
+
+`--domain` is required when creating a concept (the subject area — `etf`, `ocaml`,
+`consensus`); the tool refuses rather than filing it in a bucket the index cannot group.
+Updating keeps the existing domain, so pass `--domain` again only to change it.
+
+## The file
+
+One concept per file in `~/.laconic/concepts/<id>.md`, domain-agnostic — a protocol, a
+library, a build tool, a business term, a maths idea.
+
+```markdown
+---
+id: tezos-finality
+type: concept
+domain: consensus
+state: verified | familiar | exposed | unknown
+confidence: 0.0-1.0
+evidence:
+  - 2026-07-20: used the term unprompted while correcting my summary
+depends-on: [consensus-tenderbake]
+last-updated: 2026-07-20
+---
+
+One sentence on what the concept is.
+
+## What the user understands about it
+## What has not been established
+```
+
+## When to update
+
+After an exchange that produced evidence. Not every turn.
+
+- **Correct unprompted use** of X, where misuse would have shown, is evidence for X.
+- **A question about one facet** of a concept is *not* evidence against the concept. Record
+  the facet as a gap with `--not-established` and leave `state` alone. Someone who commands a
+  subject can still ask about one corner of it, and demoting the whole thing there loses more
+  than it protects — it makes the next explanation re-derive things they already hold.
+- **Demote only on concept-wide uncertainty** — a question that shows the central mechanism
+  is not in place, not one that probes an edge.
+- **A very basic question** demotes the narrow concept whose central mechanism is in doubt,
+  not the surrounding domain. Do not turn one observation into unrelated claims.
+- **A verified concept** can make its `depends-on` prerequisites *likely*, but likelihood is
+  not evidence about this reader. Use the edge to decide what to check or explain; do not
+  change the prerequisite's state until it produces its own observation.
+
+Prefer concept ids narrow enough that a question about one really does bear on the whole
+thing. `rcf-repay-prerequisite` carries a clearer signal than `rcf-financing-bridge`.
+
+## The promotion ladder
+
+| Transition | Requires |
+|---|---|
+| `unknown` → `exposed` | the concept merely appeared |
+| `exposed` → `familiar` | the user used the term, or asked something presupposing it, or did not ask when asking would have been natural |
+| `familiar` → `verified` | **productive use** where misuse would have been visible — correcting you, deciding on it, constraining a design. Two independent instances, or one plus explicit confirmation |
+
+Promotion is slow, demotion is fast. One data point moves `confidence`; only repeated or
+decisive evidence moves `state`. Abrupt shifts in register disorient the reader.
+
+The tool enforces this: one observation moves one step, and `verified` needs a second
+independent observation unless you pass `--confirmed`.
+
+## The two prose sections
+
+`evidence:` records what was observed, one dated line per observation. The two sections
+record what it *adds up to* — a standing distillation, not a second log. Write them with
+`--understands` and `--not-established`, which **replace** the section rather than append.
+
+A distillation is not an observation, so pass those flags **alone** — no `--evidence`, no
+`--state`. The call leaves `state`, `confidence` and `last-updated` untouched, because
+summarising evidence you already recorded is not new evidence and must not reset the
+staleness clock. (Requiring `--evidence` here would have left inventing an observation as the
+only way to write a summary — the one thing the policy forbids outright.)
+
+Distil once a concept has ~3 observations; below that the evidence lines are shorter than any
+summary of them. The tool prints a reminder when a concept crosses that line with the gap
+still empty, and the lint warns about it.
+
+**`What has not been established` is the half that gets injected**, because `state` already
+compresses "what they understand" into one word — the gap is what adds information the
+frontmatter cannot carry. It reaches the next session as an `## Established gaps` block that
+*overrides* the state: a concept can read `verified` and still name a part you must explain.
+Keep it to a clause or two; the block is bounded and discloses what it drops.
+
+`What the user understands about it` is never injected. It is for the user reading
+`concepts/`, and for you when you open the file directly.
+
+## Decay
+
+Silence changes what the injection claims, tiered by state: `verified` never decays,
+`familiar` softens to `exposed` after long silence, a single-observation `exposed` leaves the
+injection, `unknown` persists. Thresholds live in `effective_state()` in
+`tools/laconic_index.py`, which is the source of truth.
+
+Decay affects the injected view only. Files keep every observation, and fresh evidence
+resurrects a dropped concept.
+
+## Kinds of evidence
+
+`--kind` marks what sort of observation a line records. The default, `term`, is the weakest:
+
+| kind | what you saw |
+|---|---|
+| `term` | used the term correctly and unprompted, where misuse would have shown |
+| `world` | explained how a solution relates to the affairs of the world it handles |
+| `justification` | explained or challenged **why** a part is the way it is |
+| `modification` | answered a demand for change in a way that fitted the existing design |
+
+The last three are Naur's criteria for possessing the *theory* of a system (*Programming as
+Theory Building*, 1985). His Case 1 is the argument for ranking them above vocabulary: a
+second team held the full annotated program text and still proposed extensions "in the form
+of patches that effectively destroyed its power and simplicity", which the original team
+"were able to spot instantly". The difference showed up in a modification proposal, never in
+which words either team used.
+
+Prefer the strongest kind the observation actually supports, and do not inflate — `term` is
+the honest label for someone merely saying a word.
+
+An **unmarked** line is *unclassified*, not `term`: it predates this distinction, and
+conflating the two would fabricate a baseline for the measurement the kinds exist to make.
+
+## Forgetting
+
+`--forget "reason"` deletes a concept. The reason is required and lands in the commit
+message, for the same auditability that makes `evidence` required — an unexplained hole in
+the history is worse than no history. The tool prints the exact `git revert` that undoes it.
+
+If other concepts `depends-on` the target it refuses and names them. `--force` then forgets it
+*and* strips those references: a dangling `depends-on` makes the lint error, and the Stop hook
+blocks on lint errors, so a deletion that left one would block every later turn.
+
+Forget test pollution and wrong inferences. Do **not** forget a concept for going stale —
+decay already handles that while keeping the file.
+
+## When the model is busy
+
+Writes take a lock that `laconic-sync.sh` also holds, across a network fetch and merge. If it
+is not free within 15 seconds, the recorder does **not** wait and does not proceed unlocked —
+it parks the observation in `~/.laconic/spool/` and exits 0:
+
+```
+spooled tezos-finality: model lock busy, parked as 20260728T124521840986-4212.json
+  the next record that gets the lock folds it in — nothing is lost
+```
+
+The next record that acquires the lock drains the spool first, oldest first, and says how many
+it folded in. Nothing to do by hand. A parked entry keeps the date it was observed, not the
+date it was drained, so the staleness clock stays honest.
+
+Two things do not spool. A `--forget` fails loudly instead: parking a deletion to run later,
+against a model that has moved on since, is worse than saying so now. And an entry that cannot
+be replayed is set aside as `.bad` rather than retried forever, so one poisoned record cannot
+block every later one.
+
+This exists because the earlier behaviour was to proceed *without* the lock after the wait,
+which traded a loud failure for a silent lost update — two recorders each appending to the
+same base, one observation gone.
+
+## Never
+
+- **Never invent evidence.** Every entry above `unknown` carries a dated observation. If you
+  cannot cite what you saw, the state is `unknown`.
+- **Never record diagnosed misconceptions.** Record uncertainty instead. The claim that
+  misconception libraries improve remediation did not survive verification.
+- **Never let stated preference drive the policy.** Asking "was that helpful?" and optimising
+  for the answer measurably degrades decisions — an agent tuned to preference produced
+  significantly more inappropriate compliance.
+- **Never put secrets, credentials, or verbatim confidential material in evidence.** Every
+  entry is committed locally. Background pushes require both a configured `origin` remote
+  and `LACONIC_PUSH=1` in the environment that launches Claude Code; without both, nothing
+  leaves the machine. Describe the observation, not the content:
+  "correctly reasoned about the repayment precondition", not the counterparty's terms. The
+  same applies to `--summary` and both prose sections.
+
+## Checking the model
+
+```bash
+~/.laconic/bin/laconic-lint     # schema, evidence, graph integrity, staleness, budget
+~/.laconic/bin/laconic-console  # local web console, http://127.0.0.1:7642/
+```
+
+The console is an open learner model: it exists so the user can correct specific inferences.
+Every change it makes goes through the same schema, ladder, index regeneration and commit as
+an agent-recorded one.

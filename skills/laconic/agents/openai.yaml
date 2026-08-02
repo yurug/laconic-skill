@@ -1,0 +1,4 @@
+interface:
+  display_name: "Laconic"
+  short_description: "Clear technical writing without redundant explanation"
+  default_prompt: "Use $laconic to make this technical document concise, well-structured, and calibrated to its reader."

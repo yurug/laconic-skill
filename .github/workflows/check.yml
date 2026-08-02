@@ -1,0 +1,31 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Require ShellCheck
+        run: command -v shellcheck
+      - name: Run release checks
+        env:
+          LACONIC_HOME: ${{ runner.temp }}/laconic-model
+        run: ./check.sh
+      - name: Validate JSON manifests
+        run: python3 -m json.tool .claude-plugin/plugin.json >/dev/null && python3 -m json.tool .claude-plugin/marketplace.json >/dev/null && python3 -m json.tool hooks/hooks.json >/dev/null

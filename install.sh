@@ -40,7 +40,7 @@ fi
 # laconic_record.py command is unresolvable from an arbitrary working directory.
 if command -v python3 >/dev/null 2>&1; then
   BINDIR="$(LACONIC_HOME="$LACONIC_HOME" python3 "${REPO}/tools/laconic_index.py" --ensure-bin)"
-  echo "commands: ${BINDIR}/laconic-record, laconic-lint, laconic-index, laconic-console"
+  echo "commands: ${BINDIR}/laconic-record, laconic-lint, laconic-index, laconic-console, laconic-candidates"
 else
   echo "WARNING: python3 not found; the laconic commands could not be created." >&2
 fi

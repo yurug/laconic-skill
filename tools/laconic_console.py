@@ -33,6 +33,7 @@ from laconic_index import (  # noqa: E402
     STATES,
     atomic_write_text,
     parse_frontmatter,
+    parse_capabilities,
     write_index_file,
 )
 from laconic_lint import SECRET_PATTERNS  # noqa: E402
@@ -113,8 +114,9 @@ def read_concept(path):
             body_started = True
     # simpler summary: first non-heading line of the body
     m = text.split("\n---", 1)
+    body = m[1] if len(m) == 2 else ""
     if len(m) == 2:
-        for line in m[1].splitlines():
+        for line in body.splitlines():
             s = line.strip()
             if s and not s.startswith("#"):
                 summary = s
@@ -132,6 +134,7 @@ def read_concept(path):
         "state": meta.get("state", "unknown"),
         "confidence": conf,
         "evidence": evidence,
+        "capabilities": parse_capabilities(body),
         "summary": summary,
         "depends_on": deps,
         "last_updated": meta.get("last-updated", ""),

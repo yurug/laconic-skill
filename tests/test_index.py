@@ -36,7 +36,7 @@ class TestAtomicWrite(unittest.TestCase):
 
 
 def concept(cid, state="exposed", domain="testing", observations=1, gap="", projects=(),
-            last_updated="2026-07-28"):
+            last_updated="2026-07-28", capabilities=(), strong_evidence=()):
     return {
         "id": cid,
         "state": state,
@@ -45,6 +45,8 @@ def concept(cid, state="exposed", domain="testing", observations=1, gap="", proj
         "gap": gap,
         "projects": list(projects),
         "last-updated": last_updated,
+        "capabilities": list(capabilities),
+        "strong_evidence": list(strong_evidence),
     }
 
 
@@ -191,6 +193,136 @@ class TestGapRendering(unittest.TestCase):
             self.assertNotIn("+1 more gaps", out)
 
 
+class TestCapabilityRendering(unittest.TestCase):
+    def capability(self, kind, claim, scope="general", condition="", capability_id=None,
+                   requires=(), supersedes=(), contradicts=(), valid_until="",
+                   retracted="", retraction_reason=""):
+        return {"kind": kind, "claim": claim, "date": "2026-07-28",
+                "scope": scope, "condition": condition,
+                "capability_id": capability_id or L.capability_id_from_claim(claim),
+                "requires": list(requires), "supersedes": list(supersedes),
+                "contradicts": list(contradicts), "valid_until": valid_until,
+                "retracted": retracted, "retraction_reason": retraction_reason}
+
+    def test_injects_demonstrated_ability(self):
+        c = concept("design", capabilities=[self.capability(
+            "justification", "Can explain why the boundary exists"
+        )])
+        out = L.render([c])
+        self.assertIn("Established capabilities", out)
+        self.assertIn(
+            "design/can-explain-why-the-boundary-exists [justification, general]",
+            out,
+        )
+
+    def test_project_relevance_outranks_kind(self):
+        elsewhere = concept("elsewhere", projects=["/other"], capabilities=[
+            self.capability("modification", "Can modify the unrelated system", "project")
+        ])
+        here = concept("here", projects=["/project"], capabilities=[
+            self.capability("world", "Can map this system to its domain", "project")
+        ])
+        selected = L.select_capabilities([elsewhere, here], "/project")
+        self.assertEqual(selected[0]["id"], "here")
+
+    def test_capability_block_is_bounded_and_discloses_drops(self):
+        cs = [concept(f"c{i}", capabilities=[self.capability(
+            "world", "Can explain " + "detail " * 40
+        )]) for i in range(L.CAPABILITY_LIMIT + 3)]
+        out = L.render_capabilities(L.select_capabilities(cs, None))
+        shown = [line for line in out.splitlines() if line.startswith("- c")]
+        self.assertLessEqual(len(shown), L.CAPABILITY_LIMIT)
+        self.assertIn("more capabilities over budget", out)
+
+    def test_legacy_concept_without_capabilities_still_renders(self):
+        out = L.render([concept("legacy")])
+        self.assertIn("legacy", out)
+        self.assertNotIn("Established capabilities", out)
+
+    def test_project_capability_does_not_transfer_to_another_project(self):
+        c = concept("local", projects=["/project-a"], capabilities=[
+            self.capability("world", "Can apply the local mechanism", "project")
+        ])
+        self.assertEqual(L.select_capabilities([c], "/project-b"), [])
+
+    def test_condition_reaches_the_injection(self):
+        c = concept("conditional", capabilities=[self.capability(
+            "modification", "Can change the scheduler", condition="the queue remains FIFO"
+        )])
+        out = L.render([c])
+        self.assertIn("when the queue remains FIFO", out)
+
+    def test_old_capability_line_defaults_to_project_scope(self):
+        body = ("## Established capabilities\n"
+                "- [world] Can map it (evidence: 2026-07-28)\n")
+        parsed = L.parse_capabilities(body)
+        self.assertEqual(parsed[0]["scope"], "project")
+        self.assertEqual(parsed[0]["condition"], "")
+
+    def test_missing_active_prerequisite_suppresses_dependent_capability(self):
+        prerequisite = concept("base", projects=["/elsewhere"], capabilities=[
+            self.capability("world", "Can establish the base", "project", capability_id="base")
+        ])
+        dependent = concept("advanced", capabilities=[self.capability(
+            "modification", "Can change the advanced system", capability_id="advanced",
+            requires=["base/base"],
+        )])
+        selected = L.select_capabilities([prerequisite, dependent], "/here")
+        self.assertEqual(selected, [])
+
+    def test_active_superseder_removes_replaced_capability(self):
+        old = concept("model", capabilities=[self.capability(
+            "world", "Can use the old model", capability_id="old"
+        )])
+        new = concept("model", capabilities=[self.capability(
+            "modification", "Can use the new model", capability_id="new",
+            supersedes=["model/old"],
+        )])
+        selected = L.select_capabilities([old, new], None)
+        self.assertEqual([item["capability_id"] for item in selected], ["new"])
+
+    def test_contradiction_is_visible(self):
+        a = concept("model", capabilities=[self.capability(
+            "world", "Can reason under model A", capability_id="a",
+            contradicts=["model/b"],
+        )])
+        b = concept("model", capabilities=[self.capability(
+            "world", "Can reason under model B", capability_id="b",
+        )])
+        out = L.render([a, b])
+        self.assertIn("contradicts model/b", out)
+
+    def test_expired_capability_is_not_selected(self):
+        import datetime
+
+        c = concept("old", capabilities=[self.capability(
+            "world", "Can use the old API", valid_until="2026-07-31"
+        )])
+        self.assertEqual(L.select_capabilities(
+            [c], None, datetime.date(2026, 8, 1)
+        ), [])
+
+    def test_valid_until_date_is_inclusive(self):
+        import datetime
+
+        c = concept("current", capabilities=[self.capability(
+            "world", "Can use the current API", valid_until="2026-08-01"
+        )])
+        self.assertEqual(len(L.select_capabilities(
+            [c], None, datetime.date(2026, 8, 1)
+        )), 1)
+
+    def test_retracted_capability_and_its_dependent_are_not_selected(self):
+        base = concept("base", capabilities=[self.capability(
+            "world", "Can do base", capability_id="base", retracted="2026-08-01",
+            retraction_reason="system changed",
+        )])
+        dependent = concept("next", capabilities=[self.capability(
+            "modification", "Can do next", capability_id="next", requires=["base/base"]
+        )])
+        self.assertEqual(L.select_capabilities([base, dependent], None), [])
+
+
 class TestRender(ModelTestCase):
     def test_empty_model_says_so(self):
         mod = self.fresh_index_module()
@@ -242,6 +374,21 @@ class TestIndexFile(ModelTestCase):
 
 
 class TestBudgetCheck(ModelTestCase):
+    def test_combined_capabilities_and_gaps_fit_the_index_budget(self):
+        from laconic_lint import INDEX_BUDGET
+
+        abilities = [{"kind": "modification", "claim": "Can modify " + "detail " * 40,
+                      "date": "2026-07-28", "scope": "general", "condition": ""}]
+        evidence = [{"index": i + 1, "date": "2026-07-28", "kind": "world",
+                     "text": "mapped a difficult system"} for i in range(3)]
+        concepts = [
+            concept(f"long-concept-{i}", state="verified", observations=3,
+                    gap="gap " * 60, capabilities=abilities,
+                    strong_evidence=evidence if i == 0 else ())
+            for i in range(30)
+        ]
+        self.assertLessEqual(len(L.render(concepts, cwd="/project")), INDEX_BUDGET)
+
     def test_lint_measures_the_worst_case_across_projects(self):
         """A cwd-less render is smaller than a project-scoped one, so measuring without a
         cwd would hide a real overage."""
@@ -280,7 +427,8 @@ class TestStableCommandPath(ModelTestCase):
     def test_ensure_bin_creates_the_wrappers(self):
         r = self.index("--ensure-bin")
         self.assertEqual(r.code, 0, r.text)
-        for name in ("laconic-record", "laconic-lint", "laconic-index"):
+        for name in ("laconic-record", "laconic-lint", "laconic-index",
+                     "laconic-candidates"):
             self.assertTrue((self.home / "bin" / name).exists(), name)
 
     def test_wrappers_are_executable(self):

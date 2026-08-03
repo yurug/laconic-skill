@@ -14,10 +14,15 @@ projects: [/home/user/work/protocol]
 state: verified          # verified | familiar | exposed | unknown
 confidence: 0.9
 evidence:
-  - 2026-07-20: used the term unprompted while correcting my summary
+  - 2026-07-20: [justification] derived the threshold from the failure model
 depends-on: [consensus-tenderbake]
 last-updated: 2026-07-20
 ---
+
+Tezos finality.
+
+## Established capabilities
+- [justification] Can justify the finality threshold from the failure model (evidence: 2026-07-20) [scope: project]
 ```
 
 `~/.laconic/INDEX.md` is regenerated from the concept files and is what gets injected into a
@@ -61,6 +66,43 @@ Evidence can be marked `term`, `world`, `justification`, or `modification`. The 
 three record Peter Naur's criteria for possessing the theory of a system; they are retained
 separately because repeating vocabulary is weaker evidence than mapping a design to the
 world, explaining why it exists, or modifying it coherently.
+
+A strong observation can establish a reusable capability in the same write:
+
+```bash
+~/.laconic/bin/laconic-record tezos-finality --state familiar --domain consensus \
+  --kind justification --evidence "derived the threshold from the failure model" \
+  --capability "Can justify the finality threshold from the failure model" \
+  --capability-condition "the stated fault bounds still apply"
+```
+
+Strong evidence recorded without a capability remains a review candidate. List candidates
+relevant to the current project with `~/.laconic/bin/laconic-candidates`, then distil one
+without fabricating or duplicating an observation:
+
+```bash
+~/.laconic/bin/laconic-record tezos-finality --capability-from 2 \
+  --capability "Can justify the finality threshold from the failure model"
+```
+
+The evidence number is one-based. The recorder derives the capability's kind and date from
+that exact line and leaves state, confidence, last-update time, and the evidence log intact.
+
+Capabilities are narrower than concept states. Each records what the user demonstrated, its
+evidence kind, the date of matching evidence, a `project`, `domain`, or `general` scope, and
+an optional validity condition. Scope defaults to `project`; wider transfer must be directly
+demonstrated. Relevant capabilities are injected so the agent can omit exactly what was
+established without assuming mastery of the entire concept.
+
+Capabilities may have stable kebab-case ids and qualified relations such as
+`consensus/can-justify-threshold`. `requires` gates applicability, `supersedes` replaces an
+older active claim, and `contradicts` exposes an incompatibility without choosing a winner.
+The lint rejects dangling references, self-relations, duplicate ids, and prerequisite cycles.
+
+Temporary capabilities can carry `valid-until`; the date is inclusive. Obsolete or disproved
+capabilities are marked with `--retract-capability <id> --reason "why"`, retained for audit,
+and excluded from injection. In both cases, capabilities that require the inactive claim are
+also excluded. A later matching strong observation can reactivate the same id.
 
 ## Stored data and synchronization
 

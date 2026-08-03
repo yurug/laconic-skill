@@ -29,12 +29,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from laconic_index import (  # noqa: E402
+    CAPABILITIES,
+    CAPABILITY_KINDS,
+    CAPABILITY_SCOPES,
+    CAPABILITY_REF_RE,
+    CAPABILITY_EXTENDED_RE,
     NOT_ESTABLISHED,
     SUMMARY_AFTER,
     UNDERSTANDS,
     atomic_write_text,
+    capability_id_from_claim,
     get_section,
     heading_re,
+    load_concepts,
     write_index_file,
 )
 
@@ -464,6 +471,70 @@ def set_section(body, heading, text):
     return f"{head}\n{text}\n\n{tail}" if tail else f"{head}\n{text}\n"
 
 
+def add_capability(body, kind, claim, today, scope="project", condition="",
+                   capability_id=None, requires=(), supersedes=(), contradicts=(),
+                   valid_until="", source_evidence=None):
+    """Append one deduplicated capability claim tied to the observation date."""
+    claim = " ".join(claim.split())
+    condition_suffix = f" [when: {condition}]" if condition else ""
+    validity_suffix = f" [valid-until: {valid_until}]" if valid_until else ""
+    capability_id = capability_id or capability_id_from_claim(claim)
+    relation_suffix = "".join(
+        f" [{name}: {', '.join(values)}]" for name, values in (
+            ("requires", requires), ("supersedes", supersedes), ("contradicts", contradicts)
+        ) if values
+    )
+    source_suffix = f" [source-evidence: {source_evidence}]" if source_evidence else ""
+    line = (f"- [{kind}] {claim} (evidence: {today}) [scope: {scope}]"
+            f"{condition_suffix}{validity_suffix} [id: {capability_id}]"
+            f"{relation_suffix}{source_suffix}")
+    current = get_section(body, CAPABILITIES)
+    lines = current.splitlines() if current else []
+    prefix = f"- [{kind}] {claim} (evidence: "
+    lines = [existing for existing in lines if not existing.startswith(prefix)]
+    lines.append(line)
+    return set_section(body, CAPABILITIES, "\n".join(lines))
+
+
+def retract_capability(concept_id, capability_id, reason, today):
+    """Retain an invalid claim for audit while removing it from future injections."""
+    path = home() / "concepts" / f"{concept_id}.md"
+    if not path.is_file():
+        print(f"error: {concept_id} does not exist", file=sys.stderr)
+        return 2
+    meta, evidence, body = parse_existing(path)
+    if meta is None:
+        print(f"error: {path} has malformed frontmatter", file=sys.stderr)
+        return 2
+    lines = get_section(body, CAPABILITIES).splitlines()
+    found = False
+    for index, line in enumerate(lines):
+        match = CAPABILITY_EXTENDED_RE.fullmatch(line.strip())
+        if not match:
+            continue
+        line_id = match.group(7) or capability_id_from_claim(match.group(2))
+        if line_id != capability_id:
+            continue
+        found = True
+        if match.group(12):
+            print(f"error: capability '{concept_id}/{capability_id}' is already retracted",
+                  file=sys.stderr)
+            return 2
+        lines[index] = (line.rstrip() + f" [retracted: {today}]"
+                        f" [retraction-reason: {reason}]")
+        break
+    if not found:
+        print(f"error: capability '{concept_id}/{capability_id}' does not exist", file=sys.stderr)
+        return 2
+    body = set_section(body, CAPABILITIES, "\n".join(lines))
+    atomic_write_text(path, render(meta, evidence, body))
+    write_index_file(today)
+    git_commit(home(), f"retract {concept_id}/{capability_id} — {reason}")
+    git_push_async(home())
+    print(f"retracted {concept_id}/{capability_id}: {reason}")
+    return 0
+
+
 def render(meta, evidence, body):
     order = [
         "id", "type", "domain", "projects", "state", "confidence",
@@ -494,6 +565,34 @@ def main():
         default="term",
         help="what kind of evidence this is; the last three are Naur's theory criteria",
     )
+    ap.add_argument(
+        "--capability",
+        default=None,
+        help="ability demonstrated by this evidence; requires world, justification, or modification",
+    )
+    ap.add_argument(
+        "--capability-scope", choices=CAPABILITY_SCOPES, default="project",
+        help="where the demonstrated ability transfers; defaults conservatively to project",
+    )
+    ap.add_argument(
+        "--capability-condition", default=None,
+        help="condition under which the capability remains valid",
+    )
+    ap.add_argument("--capability-id", default=None, help="stable kebab-case capability id")
+    ap.add_argument("--capability-requires", default=None,
+                    help="comma-separated concept/capability prerequisites")
+    ap.add_argument("--capability-supersedes", default=None,
+                    help="comma-separated concept/capability claims this replaces")
+    ap.add_argument("--capability-contradicts", default=None,
+                    help="comma-separated concept/capability claims incompatible with this one")
+    ap.add_argument("--capability-valid-until", default=None,
+                    help="ISO date after which the capability is no longer injected")
+    ap.add_argument("--capability-from", type=int, default=None, metavar="EVIDENCE_NUMBER",
+                    help="distil an existing numbered strong observation without duplicating it")
+    ap.add_argument("--retract-capability", default=None,
+                    help="retract this local capability id without deleting its history")
+    ap.add_argument("--reason", default=None,
+                    help="required audit reason for --retract-capability")
     ap.add_argument("--domain", default=None)
     ap.add_argument("--confidence", type=float, default=None)
     ap.add_argument("--depends-on", default=None, help="comma-separated concept ids")
@@ -535,6 +634,19 @@ def main():
         conflicts = {
             "--state": args.state,
             "--evidence": args.evidence,
+            "--capability": args.capability,
+            "--capability-scope": (
+                args.capability_scope if args.capability_scope != "project" else None
+            ),
+            "--capability-condition": args.capability_condition,
+            "--capability-id": args.capability_id,
+            "--capability-requires": args.capability_requires,
+            "--capability-supersedes": args.capability_supersedes,
+            "--capability-contradicts": args.capability_contradicts,
+            "--capability-valid-until": args.capability_valid_until,
+            "--capability-from": args.capability_from,
+            "--retract-capability": args.retract_capability,
+            "--reason": args.reason,
             "--understands": args.understands,
             "--not-established": args.not_established,
             "--domain": args.domain,
@@ -550,11 +662,79 @@ def main():
     elif args.force:
         ap.error("--force only applies to --forget")
 
+    if args.retract_capability is not None:
+        conflicts = {
+            "--state": args.state, "--evidence": args.evidence,
+            "--capability": args.capability, "--understands": args.understands,
+            "--not-established": args.not_established, "--domain": args.domain,
+            "--confidence": args.confidence, "--depends-on": args.depends_on,
+            "--summary": args.summary,
+            "--capability-scope": (
+                args.capability_scope if args.capability_scope != "project" else None
+            ),
+            "--capability-condition": args.capability_condition,
+            "--capability-id": args.capability_id,
+            "--capability-requires": args.capability_requires,
+            "--capability-supersedes": args.capability_supersedes,
+            "--capability-contradicts": args.capability_contradicts,
+            "--capability-valid-until": args.capability_valid_until,
+            "--capability-from": args.capability_from,
+        }
+        used = sorted(key for key, value in conflicts.items() if value is not None)
+        if used:
+            ap.error(f"--retract-capability cannot be combined with {', '.join(used)}")
+        if not ID_RE.fullmatch(args.retract_capability):
+            ap.error("--retract-capability must be a lowercase kebab-case id")
+        if args.reason is None or not args.reason.strip():
+            ap.error("--retract-capability requires --reason")
+        if any(char in args.reason for char in ("\n", "\r", "]")):
+            ap.error("--reason must be one line and cannot contain ']'")
+    elif args.reason is not None:
+        ap.error("--reason only applies to --retract-capability")
+
     distil_only = args.forget is None and args.evidence is None
-    if distil_only and args.understands is None and args.not_established is None:
+    if (distil_only and args.understands is None and args.not_established is None
+            and args.capability is None and args.retract_capability is None):
         ap.error("--evidence is required unless you pass --understands or --not-established")
-    if args.state is None and not distil_only and args.forget is None:
+    if (args.state is None and not distil_only and args.forget is None
+            and args.retract_capability is None):
         ap.error("--state is required when recording an observation")
+    if args.capability is not None:
+        if args.evidence is None and args.capability_from is None:
+            ap.error("--capability requires --evidence or --capability-from")
+        if args.evidence is not None and args.capability_from is not None:
+            ap.error("--capability-from cannot be combined with --evidence")
+        if args.capability_from is not None and args.capability_from < 1:
+            ap.error("--capability-from is a one-based evidence number")
+        if args.capability_from is None and args.kind not in CAPABILITY_KINDS:
+            ap.error("--capability requires --kind world, justification, or modification")
+        if not args.capability.strip() or "\n" in args.capability or "\r" in args.capability:
+            ap.error("--capability must be one non-empty line")
+        for label, value in (("--capability", args.capability),
+                             ("--capability-condition", args.capability_condition)):
+            if value is not None and "]" in value:
+                ap.error(f"{label} cannot contain ']' (reserved by the on-disk format)")
+        if args.capability_condition is not None and not args.capability_condition.strip():
+            ap.error("--capability-condition must not be empty")
+        if args.capability_id is not None and not ID_RE.fullmatch(args.capability_id):
+            ap.error("--capability-id must be lowercase kebab-case")
+        for label, value in (
+            ("--capability-requires", args.capability_requires),
+            ("--capability-supersedes", args.capability_supersedes),
+            ("--capability-contradicts", args.capability_contradicts),
+        ):
+            invalid = [ref for ref in (value or "").split(",")
+                       if ref.strip() and not CAPABILITY_REF_RE.fullmatch(ref.strip())]
+            if invalid:
+                ap.error(f"{label} expects concept/capability references")
+        if (args.capability_valid_until is not None
+                and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.capability_valid_until)):
+            ap.error("--capability-valid-until must be ISO YYYY-MM-DD")
+    elif (args.capability_condition is not None or args.capability_scope != "project"
+          or args.capability_id is not None or args.capability_requires is not None
+          or args.capability_supersedes is not None or args.capability_contradicts is not None
+          or args.capability_valid_until is not None or args.capability_from is not None):
+        ap.error("capability metadata and relations require --capability")
 
     if not ID_RE.match(args.concept_id):
         print(f"error: id '{args.concept_id}' must be lowercase kebab-case", file=sys.stderr)
@@ -577,6 +757,17 @@ def main():
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", today):
         print(f"error: --date '{today}' is not YYYY-MM-DD", file=sys.stderr)
         return 2
+    if args.capability_valid_until is not None:
+        try:
+            expiry = date.fromisoformat(args.capability_valid_until)
+            observed = date.fromisoformat(today)
+        except ValueError:
+            print("error: --capability-valid-until is not a real date", file=sys.stderr)
+            return 2
+        if expiry < observed:
+            print("error: --capability-valid-until cannot precede the evidence date",
+                  file=sys.stderr)
+            return 2
 
     # Held from before the file is parsed through the write, index regen and commit, as one
     # unit neither a concurrent recorder nor laconic-sync.sh can interleave with.
@@ -584,13 +775,13 @@ def main():
     lock = acquire_model_lock(home())
 
     if lock is None:
-        if args.forget is not None:
+        if args.forget is not None or args.retract_capability is not None:
             # Not spoolable: forgetting is interactive, rare and destructive. Parking a
             # deletion to run later, against a model that has moved on since, is worse
             # than saying so now.
             print(
                 f"error: could not acquire the model lock in {LOCK_WAIT_SECONDS}s — "
-                f"laconic-sync.sh may be mid-merge. Nothing was forgotten; re-run to retry.",
+                f"laconic-sync.sh may be mid-merge. Nothing changed; re-run to retry.",
                 file=sys.stderr,
             )
             return 1
@@ -608,6 +799,10 @@ def main():
 
     if args.forget is not None:
         return forget(args.concept_id, args.forget.strip(), args.force, today)
+    if args.retract_capability is not None:
+        return retract_capability(
+            args.concept_id, args.retract_capability, args.reason.strip(), today
+        )
     return apply_record(args, today)
 
 
@@ -618,6 +813,19 @@ def apply_record(args, today, quiet=False):
     replay implementation would be a second way to write the model, free to drift from the
     first.
     """
+    # Spool entries survive upgrades. `getattr` keeps entries written before the
+    # capability field existed replayable instead of setting them aside as malformed.
+    capability = getattr(args, "capability", None)
+    capability_scope = getattr(args, "capability_scope", "project")
+    capability_condition = getattr(args, "capability_condition", None) or ""
+    capability_valid_until = getattr(args, "capability_valid_until", None) or ""
+    capability_from = getattr(args, "capability_from", None)
+    capability_id = getattr(args, "capability_id", None)
+    capability_relations = {
+        name: [ref.strip() for ref in (getattr(args, f"capability_{name}", None) or "").split(",")
+               if ref.strip()]
+        for name in ("requires", "supersedes", "contradicts")
+    }
     distil_only = args.forget is None and args.evidence is None
     concepts = home() / "concepts"
     concepts.mkdir(parents=True, exist_ok=True)
@@ -733,12 +941,88 @@ def apply_record(args, today, quiet=False):
 
     if not body.strip():
         summary = args.summary or f"{args.concept_id.replace('-', ' ')}."
-        body = f"{summary}\n\n## {UNDERSTANDS}\n\n## {NOT_ESTABLISHED}\n"
+        body = (f"{summary}\n\n## {CAPABILITIES}\n\n"
+                f"## {UNDERSTANDS}\n\n## {NOT_ESTABLISHED}\n")
 
     if args.understands is not None:
         body = set_section(body, UNDERSTANDS, args.understands)
     if args.not_established is not None:
         body = set_section(body, NOT_ESTABLISHED, args.not_established)
+    if capability is not None:
+        capability_kind, capability_date = args.kind, today
+        if capability_from is not None:
+            if capability_from > len(evidence):
+                print(
+                    f"error: --capability-from {capability_from} exceeds the "
+                    f"{len(evidence)} recorded observation(s)",
+                    file=sys.stderr,
+                )
+                return 2
+            source = evidence[capability_from - 1]
+            source_match = re.match(
+                r"^(\d{4}-\d{2}-\d{2}): \[(world|justification|modification)\] ", source
+            )
+            if not source_match:
+                print(
+                    f"error: evidence #{capability_from} is not a strong world, "
+                    "justification, or modification observation",
+                    file=sys.stderr,
+                )
+                return 2
+            capability_date, capability_kind = source_match.groups()
+            if capability_valid_until and capability_valid_until < capability_date:
+                print("error: capability expiry precedes its source evidence", file=sys.stderr)
+                return 2
+        resolved_id = capability_id or capability_id_from_claim(capability)
+        new_ref = f"{args.concept_id}/{resolved_id}"
+        existing = {
+            f"{concept['id']}/{item['capability_id']}": item
+            for concept in load_concepts() for item in concept.get("capabilities", ())
+        }
+        if new_ref in existing and existing[new_ref]["claim"] != " ".join(capability.split()):
+            print(
+                f"error: capability id '{new_ref}' already names a different claim; "
+                "pass a distinct --capability-id",
+                file=sys.stderr,
+            )
+            return 2
+        targets = {ref for values in capability_relations.values() for ref in values}
+        relation_count = sum(len(values) for values in capability_relations.values())
+        if len(targets) != relation_count:
+            print("error: the same capability target cannot have multiple relation types",
+                  file=sys.stderr)
+            return 2
+        missing = sorted(targets - existing.keys())
+        if missing:
+            print("error: capability relation names unknown target(s): "
+                  + ", ".join(missing), file=sys.stderr)
+            return 2
+        if new_ref in targets:
+            print(f"error: capability '{new_ref}' cannot relate to itself", file=sys.stderr)
+            return 2
+
+        def reaches(start, target, seen=None):
+            if start == target:
+                return True
+            seen = set() if seen is None else seen
+            if start in seen or start not in existing:
+                return False
+            seen.add(start)
+            return any(reaches(required, target, seen)
+                       for required in existing[start].get("requires", ()))
+
+        cyclic = [required for required in capability_relations["requires"]
+                  if reaches(required, new_ref)]
+        if cyclic:
+            print("error: --capability-requires would create a cycle through: "
+                  + ", ".join(cyclic), file=sys.stderr)
+            return 2
+        body = add_capability(
+            body, capability_kind, capability, capability_date, capability_scope,
+            capability_condition.strip(),
+            resolved_id, valid_until=capability_valid_until,
+            source_evidence=capability_from, **capability_relations,
+        )
 
     atomic_write_text(path, render(meta, evidence, body))
 

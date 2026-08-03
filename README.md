@@ -42,6 +42,7 @@ depending on whether laconic is a plugin or a bare skill:
 ~/.laconic/bin/laconic-status    # is laconic doing anything at all?
 ~/.laconic/bin/laconic-console   # web console, http://127.0.0.1:7642/
 ~/.laconic/bin/laconic-lint      # validate the model
+~/.laconic/bin/laconic-candidates # review strong evidence awaiting distillation
 ```
 
 `laconic-status` answers the first question everyone asks: it reports what is installed, what
@@ -57,8 +58,9 @@ work; nothing is promoted without a dated observation you can inspect.
   change does *not* handle. Treat detail as having a cost rather than as free.
 - **A model of what you know**, one readable markdown file per concept under
   `~/.laconic/`, each carrying dated evidence for why the agent believes what it believes.
-  Concepts you have used correctly are assumed without definition; the rest get one clause or
-  a link, never both.
+  Demonstrated capabilities record what you can explain, justify, map to the world, or modify;
+  concept states remain a conservative fallback. The agent relies on the narrow capability
+  without extrapolating mastery of the entire topic.
 - **No guessing.** There is no onboarding questionnaire, because self-reported expertise has
   no predictive power for understanding. Evidence comes from questions you ask, terms you use
   correctly, and corrections you make.

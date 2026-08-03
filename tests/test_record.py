@@ -730,5 +730,264 @@ class TestEvidenceKinds(ModelTestCase):
         self.assertEqual(r.code, 0, r.text)
         self.assertIn("unclassified", r.text)
 
+
+class TestCapabilities(ModelTestCase):
+    def test_distils_an_existing_strong_observation_without_duplicating_it(self):
+        self.create(
+            "thing", "--kind", "justification", "--date", "2026-07-14",
+            evidence="derived the boundary from the failure mode",
+        )
+        before = self.evidence_lines("thing")
+        r = self.record(
+            "thing", "--capability-from", "1",
+            "--capability", "Can justify the boundary from the failure mode",
+        )
+        self.assertEqual(r.code, 0, r.text)
+        self.assertEqual(self.evidence_lines("thing"), before)
+        section = self.section("thing", "Established capabilities")
+        self.assertIn("[justification]", section)
+        self.assertIn("(evidence: 2026-07-14)", section)
+        self.assertIn("[source-evidence: 1]", section)
+
+    def test_capability_from_rejects_weak_or_missing_observations(self):
+        self.create("thing", evidence="used the term")
+        weak = self.record("thing", "--capability-from", "1", "--capability", "Can use it")
+        self.assertEqual(weak.code, 2, weak.text)
+        self.assertIn("not a strong", weak.text)
+        missing = self.record("thing", "--capability-from", "2", "--capability", "Can use it")
+        self.assertEqual(missing.code, 2, missing.text)
+        self.assertIn("exceeds", missing.text)
+
+    def test_capability_from_cannot_add_new_evidence(self):
+        self.create("thing", "--kind", "world", evidence="mapped the system")
+        r = self.record(
+            "thing", "--state", "familiar", "--evidence", "mapped it again",
+            "--kind", "world", "--capability-from", "1", "--capability", "Can map it",
+        )
+        self.assertEqual(r.code, 2, r.text)
+        self.assertIn("cannot be combined", r.text)
+
+    def test_records_a_capability_with_its_evidence_date(self):
+        self.create(
+            "thing", "--kind", "justification",
+            "--capability", "Can explain why the boundary exists",
+            "--date", "2026-08-03",
+            evidence="explained the boundary from the failure mode",
+        )
+        text = self.section("thing", "Established capabilities")
+        self.assertEqual(
+            text,
+            "- [justification] Can explain why the boundary exists "
+            "(evidence: 2026-08-03) [scope: project] "
+            "[id: can-explain-why-the-boundary-exists]",
+        )
+        injected = self.index("--cwd", str(TOOLS.parent))
+        self.assertEqual(injected.code, 0, injected.text)
+        self.assertIn(
+            "thing/can-explain-why-the-boundary-exists [justification, project]: "
+            "Can explain why the boundary exists",
+            injected.text,
+        )
+
+    def test_capability_requires_strong_evidence(self):
+        r = self.record(
+            "thing", "--state", "exposed", "--domain", "testing",
+            "--evidence", "used a term", "--capability", "Can apply it",
+        )
+        self.assertNotEqual(r.code, 0)
+        self.assertIn("requires --kind", r.text)
+
+    def test_capability_requires_same_call_evidence(self):
+        self.create("thing")
+        r = self.record("thing", "--capability", "Can apply it", "--kind", "world")
+        self.assertNotEqual(r.code, 0)
+        self.assertIn("requires --evidence", r.text)
+
+    def test_repeated_claim_replaces_its_evidence_date(self):
+        self.create(
+            "thing", "--kind", "world", "--capability", "Can map it to the domain",
+            "--date", "2026-07-01", evidence="mapped it once",
+        )
+        self.record(
+            "thing", "--state", "familiar", "--kind", "world",
+            "--capability", "Can map it to the domain", "--date", "2026-08-03",
+            "--evidence", "mapped it again",
+        )
+        section = self.section("thing", "Established capabilities")
+        self.assertEqual(section.count("Can map it to the domain"), 1)
+        self.assertIn("evidence: 2026-08-03", section)
+
+    def test_records_scope_and_condition(self):
+        self.create(
+            "thing", "--kind", "modification", "--capability", "Can change the scheduler",
+            "--capability-scope", "domain", "--capability-condition", "the queue remains FIFO",
+            evidence="changed the scheduler while preserving FIFO order",
+        )
+        section = self.section("thing", "Established capabilities")
+        self.assertIn("[scope: domain]", section)
+        self.assertIn("[when: the queue remains FIFO]", section)
+
+    def test_scope_and_condition_require_a_capability(self):
+        self.create("thing")
+        r = self.record("thing", "--understands", "summary", "--capability-scope", "general")
+        self.assertNotEqual(r.code, 0)
+        self.assertIn("require --capability", r.text)
+
+    def test_lint_rejects_a_capability_without_matching_evidence(self):
+        self.create("thing")
+        text = self.read("thing").replace(
+            "## Established capabilities\n\n",
+            "## Established capabilities\n"
+            "- [world] Can map it (evidence: 2026-08-03)\n\n",
+        )
+        self.path("thing").write_text(text, encoding="utf-8")
+        r = self.lint()
+        self.assertEqual(r.code, 1, r.text)
+        self.assertIn("no matching evidence", r.text)
+
+    def test_pre_capability_spool_entry_still_replays(self):
+        import argparse
+        import os
+        import laconic_record
+
+        legacy = argparse.Namespace(
+            concept_id="legacy", state="exposed", evidence="older observation",
+            kind="term", domain="testing", confidence=None, depends_on=None,
+            summary=None, understands=None, not_established=None, confirmed=False,
+            forget=None, force=False, date="2026-07-01",
+        )
+        with mock.patch.dict(os.environ, self.env()):
+            laconic_record.ensure_repo(self.home)
+            self.assertEqual(laconic_record.apply_record(legacy, "2026-07-01", quiet=True), 0)
+        self.assertTrue(self.path("legacy").exists())
+
+    def test_records_a_capability_prerequisite(self):
+        self.create(
+            "base", "--kind", "world", "--capability", "Can establish the base",
+            "--capability-id", "base", evidence="established the base",
+        )
+        self.create(
+            "advanced", "--kind", "modification", "--capability", "Can modify advanced",
+            "--capability-id", "advanced", "--capability-requires", "base/base",
+            evidence="modified advanced while relying on the base",
+        )
+        self.assertIn("[requires: base/base]", self.section(
+            "advanced", "Established capabilities"
+        ))
+
+    def test_refuses_an_unknown_relation_target(self):
+        r = self.record(
+            "advanced", "--state", "exposed", "--domain", "testing",
+            "--kind", "modification", "--evidence", "changed it",
+            "--capability", "Can change it", "--capability-requires", "missing/base",
+        )
+        self.assertEqual(r.code, 2, r.text)
+        self.assertIn("unknown target", r.text)
+        self.assertFalse(self.path("advanced").exists())
+
+    def test_refuses_a_capability_prerequisite_cycle(self):
+        self.create(
+            "a", "--kind", "world", "--capability", "Can do A",
+            "--capability-id", "a", evidence="did A",
+        )
+        self.create(
+            "b", "--kind", "world", "--capability", "Can do B",
+            "--capability-id", "b", "--capability-requires", "a/a", evidence="did B via A",
+        )
+        r = self.record(
+            "a", "--state", "familiar", "--kind", "world", "--evidence", "did A again",
+            "--capability", "Can do A", "--capability-id", "a",
+            "--capability-requires", "b/b",
+        )
+        self.assertEqual(r.code, 2, r.text)
+        self.assertIn("create a cycle", r.text)
+
+    def test_lint_rejects_a_dangling_capability_relation(self):
+        self.create(
+            "base", "--kind", "world", "--capability", "Can establish the base",
+            "--capability-id", "base", evidence="established the base",
+        )
+        text = self.read("base").replace(
+            "[id: base]", "[id: base] [requires: missing/base]"
+        )
+        self.path("base").write_text(text, encoding="utf-8")
+        r = self.lint()
+        self.assertEqual(r.code, 1, r.text)
+        self.assertIn("does not exist", r.text)
+
+    def test_refuses_reusing_an_id_for_a_different_claim(self):
+        self.create(
+            "thing", "--kind", "world", "--capability", "Can do the first thing",
+            "--capability-id", "stable", evidence="did the first thing",
+        )
+        r = self.record(
+            "thing", "--state", "familiar", "--kind", "world",
+            "--capability", "Can do a different thing", "--capability-id", "stable",
+            "--evidence", "did something different",
+        )
+        self.assertEqual(r.code, 2, r.text)
+        self.assertIn("already names a different claim", r.text)
+
+    def test_refuses_multiple_relation_types_to_the_same_target(self):
+        self.create(
+            "base", "--kind", "world", "--capability", "Can do base",
+            "--capability-id", "base", evidence="did base",
+        )
+        r = self.record(
+            "next", "--state", "exposed", "--domain", "testing", "--kind", "world",
+            "--capability", "Can do next", "--evidence", "did next",
+            "--capability-requires", "base/base", "--capability-contradicts", "base/base",
+        )
+        self.assertEqual(r.code, 2, r.text)
+        self.assertIn("multiple relation types", r.text)
+
+    def test_records_a_capability_expiry(self):
+        self.create(
+            "api", "--kind", "world", "--capability", "Can use API v1",
+            "--capability-id", "api-v1", "--capability-valid-until", "2026-12-31",
+            "--date", "2026-08-03", evidence="used API v1",
+        )
+        self.assertIn("[valid-until: 2026-12-31]", self.section(
+            "api", "Established capabilities"
+        ))
+
+    def test_retraction_preserves_history_but_removes_injection(self):
+        self.create(
+            "api", "--kind", "world", "--capability", "Can use API v1",
+            "--capability-id", "api-v1", "--date", "2026-08-03", evidence="used API v1",
+        )
+        evidence = self.evidence_lines("api")
+        r = self.record(
+            "api", "--retract-capability", "api-v1", "--reason", "API v1 was removed",
+            "--date", "2026-08-04",
+        )
+        self.assertEqual(r.code, 0, r.text)
+        self.assertEqual(self.evidence_lines("api"), evidence)
+        section = self.section("api", "Established capabilities")
+        self.assertIn("[retracted: 2026-08-04]", section)
+        self.assertIn("[retraction-reason: API v1 was removed]", section)
+        injected = self.index("--cwd", str(TOOLS.parent))
+        self.assertNotIn("api/api-v1", injected.text)
+
+    def test_new_evidence_reactivates_a_retracted_capability(self):
+        self.create(
+            "api", "--kind", "world", "--capability", "Can use API v1",
+            "--capability-id", "api-v1", evidence="used it",
+        )
+        self.record("api", "--retract-capability", "api-v1", "--reason", "temporarily gone")
+        self.record(
+            "api", "--state", "familiar", "--kind", "world", "--evidence", "used it again",
+            "--capability", "Can use API v1", "--capability-id", "api-v1",
+        )
+        section = self.section("api", "Established capabilities")
+        self.assertNotIn("retracted:", section)
+        self.assertEqual(section.count("[id: api-v1]"), 1)
+
+    def test_retraction_requires_a_reason(self):
+        self.create("thing")
+        r = self.record("thing", "--retract-capability", "anything")
+        self.assertNotEqual(r.code, 0)
+        self.assertIn("requires --reason", r.text)
+
 if __name__ == "__main__":
     unittest.main()

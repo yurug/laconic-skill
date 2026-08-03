@@ -62,6 +62,10 @@ Read the concept files. For each concept the text depends on:
   separated, skippable form (a linked definition, a footnote, a clearly marked background
   section) over weaving it into load-bearing prose.
 
+Treat an injected **established capability** as narrower and stronger than the concept state:
+rely on exactly the demonstrated ability without extrapolating to the whole domain. Treat an
+established gap as an exception in the other direction and explain that facet.
+
 **When uncertain, explain more.** Under-explaining a novice costs d = 0.505; over-explaining
 an expert costs d = −0.428. The first is worse, so uncertainty resolves toward explaining —
 but the second is a real cost, not a free action. Do not treat verbosity as safe.
@@ -117,6 +121,19 @@ Three rules matter often enough to state here:
   gap (`--not-established`) and leave `state` alone. Demote only when the central mechanism
   is in doubt.
 - **Never invent evidence.** No dated observation you can cite means the state is `unknown`.
+- **Record demonstrated abilities, not flattering summaries.** When `--kind world`,
+  `justification`, or `modification` shows a reusable ability, add `--capability "what the
+  user can do"`. Keep the claim narrower than the observation. Leave its scope at the safe
+  `project` default unless the evidence directly demonstrates domain or general transfer;
+  record assumptions with `--capability-condition`. Use stable capability ids and
+  `--capability-requires`, `--capability-supersedes`, or `--capability-contradicts` when the
+  ability is not independent; never infer a relation from topic similarity. Bound temporary
+  knowledge with `--capability-valid-until`. Retract a disproved or obsolete claim with
+  `--retract-capability <id> --reason "why"`; do not delete its audit trail.
+- **Review evidence before inventing another observation.** Run
+  `~/.laconic/bin/laconic-candidates`; distil an existing candidate with
+  `--capability-from <evidence-number> --capability "narrow demonstrated ability"`. This
+  does not duplicate evidence or move the concept state.
 - **Never put secrets or verbatim confidential material in evidence.** It is committed
   locally and is pushed only if the user configured an `origin` remote and enabled
   `LACONIC_PUSH=1`. Describe the observation, not the content.

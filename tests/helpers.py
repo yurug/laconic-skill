@@ -21,6 +21,7 @@ TOOLS = REPO / "tools"
 RECORD = TOOLS / "laconic_record.py"
 INDEX = TOOLS / "laconic_index.py"
 LINT = TOOLS / "laconic_lint.py"
+CANDIDATES = TOOLS / "laconic_candidates.py"
 
 sys.path.insert(0, str(TOOLS))
 

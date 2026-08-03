@@ -135,6 +135,16 @@ function card(c){
   const why=c.evidence.map(e=>{const[d,t]=splitEvidence(e);
     return `<li>${d?`<span class="date">${esc(d)}</span> `:""}${esc(t)}</li>`;}).join("")
     || `<li>no evidence recorded</li>`;
+  const abilities=(c.capabilities||[]).map(a=>{
+    const rel=["requires","supersedes","contradicts"]
+      .flatMap(k=>(a[k]||[]).map(v=>`${k} ${v}`)).join("; ");
+    const lifecycle=a.retracted?`retracted ${a.retracted}: ${a.retraction_reason}`:
+      (a.valid_until?`valid until ${a.valid_until}`:"");
+    return `<li><b>${esc(a.kind)} · ${esc(a.scope)}</b> · ${esc(a.claim)}`+
+      `${a.condition?` · when ${esc(a.condition)}`:""}${rel?` · ${esc(rel)}`:""} `+
+      `${lifecycle?` · ${esc(lifecycle)}`:""} `+
+      `<span class="date">${esc(a.date)}</span></li>`;
+  }).join("");
   const states=MODEL.states.map(s=>`<div class="s${s===c.state?" sel":""}" data-s="${s}">${s}</div>`).join("");
   return `<div class="cardc" data-id="${esc(c.id)}">
     <div class="chead">
@@ -144,6 +154,8 @@ function card(c){
     </div>
     <div class="summary${c.summary?"":" empty"}">${esc(c.summary||"no summary yet")}</div>
     <div class="conf">confidence ${(c.confidence).toFixed(2)}${c.last_updated?" · "+esc(c.last_updated):""}</div>
+    ${abilities?`<div class="lbl">Established capabilities</div><ul class="why">${abilities}</ul>`:""}
+    <div class="lbl">Evidence</div>
     <ul class="why">${why}</ul>
     <div class="actions">
       <button class="link" data-act="correct">Correct…</button>

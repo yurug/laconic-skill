@@ -24,7 +24,7 @@ from laconic_index import (  # noqa: E402
     get_section,
     parse_frontmatter,
 )
-from laconic_record import EVIDENCE_KINDS, KIND_RE  # noqa: E402
+from laconic_record import EVIDENCE_BASES, EVIDENCE_KINDS, KIND_RE  # noqa: E402
 
 REQUIRED = ["id", "type", "state", "confidence", "last-updated"]
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -140,6 +140,10 @@ def check_concept(path, report, today):
         if m and m.group(1) not in EVIDENCE_KINDS:
             report.error(path, f"unknown evidence kind '[{m.group(1)}]', "
                                f"expected one of {EVIDENCE_KINDS}")
+        basis = re.search(r"\[basis: ([^\]]+)\]", line)
+        if basis and basis.group(1) not in EVIDENCE_BASES:
+            report.error(path, f"unknown evidence basis '{basis.group(1)}', "
+                               f"expected one of {EVIDENCE_BASES}")
 
     body = text.split("\n---", 1)[1] if "\n---" in text else ""
     capability_lines = [
@@ -203,7 +207,8 @@ def check_concept(path, report, today):
     strong = []
     for index, line in enumerate(evidence, 1):
         match = re.match(
-            r"^(\d{4}-\d{2}-\d{2}): \[(world|justification|modification)\] ", line
+            r"^(\d{4}-\d{2}-\d{2}): \[(world|justification|modification)\] "
+            r"(?!\[basis: inference\])", line
         )
         if (match and index not in exact_covered
                 and match.groups() not in legacy_covered):

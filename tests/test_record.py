@@ -86,6 +86,71 @@ class TestPromotionLadder(ModelTestCase):
     def test_confirmed_reaches_verified_in_one_step(self):
         self.create("thing", "--confirmed", state="verified", evidence="confirmed outright")
         self.assertEqual(self.field("thing", "state"), "verified")
+        self.assertIn("[basis: confirmation]", self.evidence_lines("thing")[0])
+
+    def test_confirmation_basis_reaches_verified_without_legacy_flag(self):
+        self.create(
+            "thing", "--basis", "confirmation", state="verified",
+            evidence="explicitly confirmed mastery",
+        )
+        self.assertEqual(self.field("thing", "state"), "verified")
+
+    def test_inference_is_logged_but_cannot_promote_or_change_confidence(self):
+        self.create("thing", state="exposed")
+        before = self.field("thing", "confidence")
+        r = self.record(
+            "thing", "--state", "verified", "--basis", "inference",
+            "--evidence", "did not ask when asking might have been natural",
+        )
+        self.assertEqual(r.code, 0, r.text)
+        self.assertEqual(self.field("thing", "state"), "exposed")
+        self.assertEqual(self.field("thing", "confidence"), before)
+        self.assertIn("[basis: inference]", self.evidence_lines("thing")[-1])
+
+    def test_inference_may_omit_state_and_preserves_it(self):
+        self.create("thing", state="exposed")
+        r = self.record("thing", "--basis", "inference", "--evidence", "possibly knew it")
+        self.assertEqual(r.code, 0, r.text)
+        self.assertEqual(self.field("thing", "state"), "exposed")
+
+    def test_inference_without_state_creates_unknown(self):
+        r = self.record(
+            "thing", "--domain", "testing", "--basis", "inference",
+            "--evidence", "possibly knew it",
+        )
+        self.assertEqual(r.code, 0, r.text)
+        self.assertEqual(self.field("thing", "state"), "unknown")
+
+    def test_inference_cannot_demote(self):
+        self.create("thing", "--basis", "confirmation", state="verified")
+        self.record(
+            "thing", "--state", "unknown", "--basis", "inference",
+            "--evidence", "possibly hesitated",
+        )
+        self.assertEqual(self.field("thing", "state"), "verified")
+
+    def test_inference_cannot_set_confidence(self):
+        r = self.record(
+            "thing", "--domain", "testing",
+            "--basis", "inference", "--confidence", "0.8", "--evidence", "maybe knew it",
+        )
+        self.assertEqual(r.code, 2, r.text)
+        self.assertIn("cannot set confidence", r.text)
+
+    def test_inference_does_not_count_toward_verified(self):
+        self.create(
+            "thing", "--basis", "inference", state="unknown", evidence="might know it"
+        )
+        self.record("thing", "--state", "verified", "--evidence", "used it directly")
+        self.assertEqual(self.field("thing", "state"), "exposed")
+
+    def test_confirmed_rejects_a_conflicting_basis(self):
+        r = self.record(
+            "thing", "--state", "verified", "--domain", "testing", "--confirmed",
+            "--basis", "inference", "--evidence", "contradictory provenance",
+        )
+        self.assertEqual(r.code, 2, r.text)
+        self.assertIn("conflicts", r.text)
 
     def test_two_observations_then_verified(self):
         self.create("thing", state="exposed")
@@ -720,6 +785,14 @@ class TestEvidenceKinds(ModelTestCase):
         self.assertEqual(r.code, 1, r.text)
         self.assertIn("unknown evidence kind", r.text)
 
+    def test_lint_errors_on_a_corrupted_basis(self):
+        self.create("thing", "--basis", "inference", state="unknown")
+        text = self.read("thing").replace("[basis: inference]", "[basis: hearsay]")
+        self.path("thing").write_text(text, encoding="utf-8")
+        r = self.lint()
+        self.assertEqual(r.code, 1, r.text)
+        self.assertIn("unknown evidence basis", r.text)
+
     def test_unmarked_evidence_stays_unclassified(self):
         """Legacy lines predate the distinction; calling them `term` would fabricate a
         baseline for the measurement the kinds exist to make."""
@@ -732,6 +805,26 @@ class TestEvidenceKinds(ModelTestCase):
 
 
 class TestCapabilities(ModelTestCase):
+    def test_inference_cannot_establish_a_capability(self):
+        r = self.record(
+            "thing", "--state", "unknown", "--domain", "testing",
+            "--kind", "world", "--basis", "inference", "--evidence", "might map it",
+            "--capability", "Can map it",
+        )
+        self.assertEqual(r.code, 2, r.text)
+        self.assertIn("cannot establish", r.text)
+
+    def test_capability_from_rejects_inferred_evidence(self):
+        self.create(
+            "thing", "--kind", "world", "--basis", "inference", state="unknown",
+            evidence="might map the system",
+        )
+        r = self.record(
+            "thing", "--capability-from", "1", "--capability", "Can map the system",
+        )
+        self.assertEqual(r.code, 2, r.text)
+        self.assertIn("inferred evidence", r.text)
+
     def test_distils_an_existing_strong_observation_without_duplicating_it(self):
         self.create(
             "thing", "--kind", "justification", "--date", "2026-07-14",

@@ -11,7 +11,7 @@ class TestCandidateSelection(ModelTestCase):
         )
         r = self.run_tool(CANDIDATES, "--cwd", str(REPO), env=self.env())
         self.assertEqual(r.code, 0, r.text)
-        self.assertIn("scheduler evidence #1 [modification, 2026-08-01]", r.text)
+        self.assertIn("scheduler evidence #1 [modification, direct, 2026-08-01]", r.text)
         self.assertIn("changed the scheduler while preserving FIFO", r.text)
         self.assertIn("--capability-from 1", r.text)
         self.assertIn("<narrow reusable ability", r.text)
@@ -37,3 +37,12 @@ class TestCandidateSelection(ModelTestCase):
         before = self.path("thing").read_bytes()
         self.run_tool(CANDIDATES, "--cwd", str(REPO), env=self.env())
         self.assertEqual(self.path("thing").read_bytes(), before)
+
+    def test_inferred_strong_evidence_is_not_a_candidate(self):
+        self.create(
+            "thing", "--kind", "world", "--basis", "inference", state="unknown",
+            evidence="might map the system",
+        )
+        r = self.run_tool(CANDIDATES, "--cwd", str(REPO), env=self.env())
+        self.assertEqual(r.code, 0, r.text)
+        self.assertIn("No undistilled strong evidence", r.text)

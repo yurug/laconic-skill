@@ -52,9 +52,9 @@ class TestInjectPolicy(HookTestCase):
     def test_compact_tail_preserves_model_safety_rules(self):
         ctx = self.envelope("SessionStart")["hookSpecificOutput"]["additionalContext"]
         for rule in (
-            "Record only direct evidence",
-            "never infer prerequisites",
-            "--kind world, justification, or",
+            "--basis inference",
+            "Never infer prerequisites",
+            "Strong --kind values",
             "facet question becomes a gap",
             "never store secrets or confidential text",
             "both an origin and LACONIC_PUSH=1",

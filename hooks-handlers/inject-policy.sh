@@ -109,9 +109,10 @@ else
   read -r -d '' TAIL <<TAIL_EOF
 - Record evidence with the tool -- never hand-write these files, they have a schema:
   ${RECORD_CMD} <id> --state <unknown|exposed|familiar|verified> --domain <subject> --evidence "what you saw"
-  Domain is required on creation. Record only direct evidence; never infer prerequisites or
-  invent observations. Classify strong evidence with --kind world, justification, or
-  modification. If it proves a reusable ability, add --capability "what the user can do".
+  Basis defaults direct; --basis confirmation means explicit confirmation; --basis inference
+  is weak and audit-only (no state/capability).
+  Never infer prerequisites or invent observations. Strong --kind values are
+  world, justification, or modification. If one proves a reusable ability, add --capability.
   For older proof, run ${MODEL_HOME}/bin/laconic-candidates and use --capability-from; never
   duplicate evidence. Scope defaults to this project; widen it only with transfer evidence.
   Record relations only when observed; retract obsolete abilities

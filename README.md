@@ -13,7 +13,7 @@ one piece of state that makes the subtraction possible.
 
 Requires Bash and Python 3.9 or newer; the runtime otherwise uses only the Python standard
 library. The plugin has been validated with Claude Code 2.1.220 and relies on plugin
-marketplace, `SessionStart`, `SubagentStart`, and `Stop` hook support.
+marketplace, `SessionStart`, `UserPromptSubmit`, `SubagentStart`, and `Stop` hook support.
 If Python disappears after installation, the universal hook degrades to a valid conservative
 context instead of breaking session startup, but model loading and maintenance are unavailable.
 
@@ -43,13 +43,28 @@ depending on whether laconic is a plugin or a bare skill:
 ~/.laconic/bin/laconic-console   # web console, http://127.0.0.1:7642/
 ~/.laconic/bin/laconic-lint      # validate the model
 ~/.laconic/bin/laconic-candidates # review strong evidence awaiting distillation
+~/.laconic/bin/laconic-bootstrap  # prepare a consented transcript review bundle
+~/.laconic/bin/laconic-review     # validate and render agent proposals; never apply them
+~/.laconic/bin/laconic-review-web # review proposals and persist accept/reject decisions
+~/.laconic/bin/laconic-apply-review # apply explicitly accepted proposals after preflight
 ```
+
+Transcript bootstrap can consolidate repeated `--project` roots, collapses exact duplicate
+turns, and quarantines obvious non-user evidence. External disclosure requires its own
+consent and an external-privacy export; no bootstrap proposal writes the model before review.
 
 `laconic-status` answers the first question everyone asks: it reports what is installed, what
 the hooks fired, and how big the model has become.
 
 Then just work. The model starts empty and accumulates evidence as the agent observes your
-work; nothing is promoted without a dated observation you can inspect.
+work; nothing is promoted without a dated observation you can inspect. Ordinary routing,
+recording, and opportunistic distillation are agent responsibilities: after installation,
+you do not need to run a command, curate an index, or answer maintenance prompts.
+
+Two privacy boundaries deliberately remain explicit. A deep bootstrap must obtain scoped
+consent before reading historical transcripts, and any external disclosure needs separate
+consent. Applying a reviewed bootstrap also remains an explicit decision because it can
+rewrite many model entries at once. These are authorization boundaries, not routine upkeep.
 
 ## What you get
 
@@ -61,6 +76,10 @@ work; nothing is promoted without a dated observation you can inspect.
   Demonstrated capabilities record what you can explain, justify, map to the world, or modify;
   concept states remain a conservative fallback. The agent relies on the narrow capability
   without extrapolating mastery of the entire topic.
+- **Hierarchical retrieval.** Session start injects a compact router and the most-specific
+  project leaf; every prompt automatically selects up to two matching domain leaves. Full
+  concept evidence loads only when needed. The model can grow without turning every session
+  into a flat concept dump or making you operate the index.
 - **No guessing.** There is no onboarding questionnaire, because self-reported expertise has
   no predictive power for understanding. Evidence comes from questions you ask, terms you use
   correctly, and corrections you make.

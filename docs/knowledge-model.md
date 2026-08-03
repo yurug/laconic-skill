@@ -83,9 +83,10 @@ A strong observation can establish a reusable capability in the same write:
   --capability-condition "the stated fault bounds still apply"
 ```
 
-Strong evidence recorded without a capability remains a review candidate. List candidates
-relevant to the current project with `~/.laconic/bin/laconic-candidates`, then distil one
-without fabricating or duplicating an observation:
+Strong evidence recorded without a capability remains a review candidate. The agent reviews
+these opportunistically and silently; the user is not responsible for an inbox. For manual
+diagnosis, `~/.laconic/bin/laconic-candidates` lists candidates relevant to the current
+project. The agent can then distil one without fabricating or duplicating an observation:
 
 ```bash
 ~/.laconic/bin/laconic-record tezos-finality --capability-from 2 \
@@ -94,6 +95,8 @@ without fabricating or duplicating an observation:
 
 The evidence number is one-based. The recorder derives the capability's kind and date from
 that exact line and leaves state, confidence, last-update time, and the evidence log intact.
+The lint verifies that the stored source index remains in range, matches that kind and date,
+and does not point to inferred evidence.
 
 Capabilities are narrower than concept states. Each records what the user demonstrated, its
 evidence kind, the date of matching evidence, a `project`, `domain`, or `general` scope, and
@@ -111,12 +114,98 @@ capabilities are marked with `--retract-capability <id> --reason "why"`, retaine
 and excluded from injection. In both cases, capabilities that require the inactive claim are
 also excluded. A later matching strong observation can reactivate the same id.
 
+## Transcript bootstrap
+
+Bootstrap is a review workflow, not an automatic model import. First inspect the scope
+without reading transcript content:
+
+```bash
+~/.laconic/bin/laconic-bootstrap --project ~/work/service --since 2026-01-01
+```
+
+The command reports only candidate file count and bytes. To create a private local bundle,
+repeat with explicit consent and an output path:
+
+```bash
+~/.laconic/bin/laconic-bootstrap --project ~/work/service --since 2026-01-01 \
+  --consent-to-read --out /private/path/laconic-review.json
+```
+
+Repeat `--project` to produce one review across several project roots. Exact duplicate turns
+are collapsed into one observation while their opaque source aliases remain recorded.
+
+The exporter keeps only human user turns in the selected projects and period, caps their
+length and total count, removes high-signal credential shapes, and assigns each an opaque,
+stable source hash. It quarantines obvious third-party material, pasted agent output, and
+evaluation instructions: those turns remain auditable but cannot support a proposal.
+It never writes the knowledge model and refuses to overwrite a prior review.
+
+The default `--privacy local` bundle still contains ordinary personal and work data. Before
+disclosure, obtain separate consent and create a new bundle with `--privacy external
+--consent-to-disclose`; this additionally masks common person-name, email, phone, URL,
+IP-address, and home-path shapes. This is risk reduction, not anonymization. Transcript text is untrusted
+evidence data, never agent instructions. An agent may turn eligible material into proposed concepts, evidence,
+capabilities, gaps, or corrections, but the user must review those proposals before they are
+applied through `laconic-record`.
+
+The bundle embeds the proposal contract an agent must follow. Validate and render its output
+without applying anything:
+
+```bash
+~/.laconic/bin/laconic-review --bundle laconic-review.json \
+  --proposals agent-proposals.json --out proposed-model.md \
+  --decisions-template decisions.json
+```
+
+The validator binds proposals to the bundle's `review_id` and source hashes, requires a
+one-line justification that the observation is attributable to the user, rejects quarantined
+and already-applied sources, and flags evidence similar to an existing observation. It also
+rejects unknown fields and secret-shaped evidence, prevents inference-driven state or
+capability claims, and allows `verified` only for explicit confirmation. The Markdown output contains unchecked
+items, source previews, stable proposal ids, and exact commands for inspection—not execution.
+For a larger review, open the decision-only local interface instead:
+
+```bash
+~/.laconic/bin/laconic-review-web --bundle laconic-review.json \
+  --proposals agent-proposals.json --decisions decisions.json
+```
+
+It compares proposals with existing concepts, surfaces duplicate warnings, filters pending
+and decided items, supports keyboard decisions, and persists after every action. It cannot
+modify or apply the model.
+Set every generated decision to `accept` or `reject`, then type the reviewed id explicitly
+to apply the accepted subset:
+
+```bash
+~/.laconic/bin/laconic-apply-review --bundle laconic-review.json \
+  --proposals agent-proposals.json --decisions decisions.json \
+  --confirm-review-id <review-id>
+```
+
+Application first replays every accepted proposal against an isolated copy and lints the
+result. It then locks the real model, aborts if it changed during preflight, publishes the
+accepted concept files, records an anti-replay marker, regenerates the index, and creates one
+model commit. Rejected proposals never reach the model; incomplete decisions are refused.
+
 ## Stored data and synchronization
 
 Each concept stores its id, domain, state, confidence, dated evidence, dependencies,
 last-update date, optional prose distillations, and the **absolute project paths** where
 observations occurred. Project paths let the injected index keep the current project's
-concepts salient; a broad parent directory does not make all child projects relevant.
+concepts salient. When recorded projects nest, the most-specific path wins, so a broad
+workspace such as `/home/yann` does not pollute a nested repository.
+
+The model has four navigation levels:
+
+1. the always-injected root router, with durable states, domain routes, and critical gaps;
+2. the complete leaf for the active project;
+3. generated domain indexes for cross-project work;
+4. concept files for evidence and detailed boundaries.
+
+Generated routes live under `~/.laconic/indexes/`: `ROOT.md`, `domains/<domain>.md`, and
+opaque project leaves named by a stable path hash. They are ignored local materializations,
+rebuilt automatically, and never replace `concepts/` as the source of truth. The traditional
+`INDEX.md` remains the complete human-readable overview.
 
 The model is local by default. Every change is committed under `~/.laconic/` for inspection
 and recovery, but Laconic never creates a remote. Background pushes require two explicit
@@ -153,9 +242,8 @@ rather than editing concept files by hand.
 
 The lint errors when a state above `unknown` carries no dated evidence, when `depends-on`
 points at a concept that does not exist, or when ids collide. It warns when a file has gone
-stale, when a concept has accumulated evidence but no distillation, and when the index has
-grown past the injection budget — measured as the worst case across every project the model
-has seen, since a session's cwd changes what gets inlined.
+stale, when a concept has accumulated evidence but no distillation, and when the hierarchical
+startup view has grown past its budget — measured as the worst root-plus-project combination.
 
 ## Decay
 

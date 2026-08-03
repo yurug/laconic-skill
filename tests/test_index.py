@@ -116,6 +116,17 @@ class TestRelevance(unittest.TestCase):
         c = concept("x", projects=["/home/y/proj"])
         self.assertFalse(L.is_relevant(c, "/home/y/proj-two"))
 
+    def test_hierarchy_chooses_the_most_specific_recorded_project(self):
+        projects = ["/home/y", "/home/y/work/proj", "/home/y/work/proj/nested"]
+        self.assertEqual(
+            L.active_project("/home/y/work/proj/src", projects),
+            "/home/y/work/proj",
+        )
+
+    def test_hierarchy_falls_back_to_parent_outside_nested_project(self):
+        projects = ["/home/y", "/home/y/work/proj"]
+        self.assertEqual(L.active_project("/home/y/notes", projects), "/home/y")
+
 
 class TestGapSelection(unittest.TestCase):
     def test_requires_accumulated_evidence(self):
@@ -354,6 +365,32 @@ class TestRender(ModelTestCase):
         out = L.render([stale], today=datetime.date(2026, 7, 28))
         self.assertNotIn("stale", out)
 
+    def test_hierarchy_injects_only_the_precise_project_leaf(self):
+        out = L.render_hierarchy([
+            concept("broad-personal", projects=["/home/y"], domain="personal"),
+            concept("project-local", projects=["/home/y/work/proj"], domain="code"),
+        ], cwd="/home/y/work/proj/src")
+        leaf = out.split("## Active project knowledge", 1)[1]
+        self.assertIn("project-local", leaf)
+        self.assertNotIn("broad-personal", leaf)
+        self.assertIn("domain routes", out)
+
+    def test_prompt_routing_selects_matching_domain(self):
+        concepts = [
+            concept("rocq-proof-obligations", domain="formal-verification"),
+            concept("postgres-indexes", domain="databases"),
+        ]
+        self.assertEqual(
+            L.select_prompt_domains(concepts, "Check these Rocq obligations"),
+            ["formal-verification"],
+        )
+
+    def test_prompt_route_is_bounded(self):
+        concepts = [concept(f"rocq-item-{i}", domain="formal-verification")
+                    for i in range(100)]
+        out = L.render_prompt_routes(concepts, "rocq", budget=700)
+        self.assertLessEqual(len(out), 700)
+
 
 class TestIndexFile(ModelTestCase):
     def test_regenerated_on_every_record(self):
@@ -364,16 +401,42 @@ class TestIndexFile(ModelTestCase):
 
     def test_reflects_a_forget(self):
         self.create("thing", domain="ocaml")
+        domain_index = self.home / "indexes" / "domains" / "ocaml.md"
+        self.assertTrue(domain_index.exists())
         self.record("thing", "--forget", "cruft")
         text = (self.home / "INDEX.md").read_text(encoding="utf-8")
         self.assertNotIn("thing", text)
+        self.assertFalse(domain_index.exists())
 
     def test_says_not_to_hand_edit(self):
         self.create("thing")
         self.assertIn("Do not hand-edit", (self.home / "INDEX.md").read_text(encoding="utf-8"))
 
+    def test_record_materializes_domain_project_and_root_indexes(self):
+        project = self.home.parent / "project"
+        project.mkdir()
+        result = self.record("thing", "--state", "exposed", "--domain", "ocaml",
+                             "--evidence", "seen", cwd=project)
+        self.assertEqual(result.code, 0, result.text)
+        indexes = self.home / "indexes"
+        self.assertIn("thing", (indexes / "domains" / "ocaml.md").read_text())
+        project_index = indexes / "projects" / f"{L.project_key(str(project))}.md"
+        self.assertIn("thing", project_index.read_text())
+        root = (indexes / "ROOT.md").read_text()
+        self.assertIn("domains/ocaml.md", root)
+        self.assertIn(str(project), root)
+
 
 class TestBudgetCheck(ModelTestCase):
+    def test_project_inline_working_set_is_bounded_before_domain_summary(self):
+        local = [concept(f"local-{i:02d}", projects=["/project"])
+                 for i in range(L.PROJECT_INLINE_LIMIT + 5)]
+        elsewhere = [concept(f"elsewhere-{i:02d}", projects=["/other"])
+                     for i in range(30)]
+        rendered = L.render(local + elsewhere, cwd="/project")
+        self.assertEqual(rendered.count("local-"), L.PROJECT_INLINE_LIMIT)
+        self.assertIn("elsewhere", rendered)
+
     def test_combined_capabilities_and_gaps_fit_the_index_budget(self):
         from laconic_lint import INDEX_BUDGET
 
@@ -428,7 +491,8 @@ class TestStableCommandPath(ModelTestCase):
         r = self.index("--ensure-bin")
         self.assertEqual(r.code, 0, r.text)
         for name in ("laconic-record", "laconic-lint", "laconic-index",
-                     "laconic-candidates"):
+                     "laconic-candidates", "laconic-bootstrap", "laconic-review",
+                     "laconic-review-web", "laconic-apply-review"):
             self.assertTrue((self.home / "bin" / name).exists(), name)
 
     def test_wrappers_are_executable(self):

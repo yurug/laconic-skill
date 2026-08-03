@@ -47,10 +47,11 @@ SECRET_PATTERNS = [
 STALE_DAYS = 180
 # The rendered index is prepended to every session; keep it from silently growing.
 #
-# Sized to what the design actually renders in its worst project-scoped case, not to an
-# aspiration. A broad cwd does not make every child project relevant: relevance is directional
-# precisely so a session in ~/ cannot inline the whole model.
-INDEX_BUDGET = 1850
+# The hierarchy injects a bounded router plus one precise project leaf. Domain and concept
+# indexes are loaded on demand, so this budget protects startup salience without forcing the
+# whole personal model through a flat list. Five thousand characters is roughly 1,250 tokens:
+# enough for a rich project leaf, still small beside a modern session context.
+INDEX_BUDGET = 5000
 
 
 class Report:
@@ -144,6 +145,12 @@ def check_concept(path, report, today):
         if basis and basis.group(1) not in EVIDENCE_BASES:
             report.error(path, f"unknown evidence basis '{basis.group(1)}', "
                                f"expected one of {EVIDENCE_BASES}")
+        sources = re.search(r"\[sources: ([^\]]+)\]", line)
+        if sources:
+            refs = [item.strip() for item in sources.group(1).split(",") if item.strip()]
+            if not refs or len(refs) != len(set(refs)) or any(
+                    not re.fullmatch(r"transcript:[0-9a-f]{64}", item) for item in refs):
+                report.error(path, "invalid transcript source reference")
 
     body = text.split("\n---", 1)[1] if "\n---" in text else ""
     capability_lines = [
@@ -157,7 +164,30 @@ def check_concept(path, report, today):
             continue
         parsed_capabilities.append(match.groups())
         kind, _, observed = match.group(1), match.group(2), match.group(3)
-        if not any(item.startswith(f"{observed}: [{kind}]") for item in evidence):
+        source_number = int(match.group(11)) if match.group(11) else None
+        if source_number is not None and source_number > len(evidence):
+            report.error(
+                path,
+                f"capability source-evidence #{source_number} exceeds the "
+                f"{len(evidence)} recorded observation(s)",
+            )
+        elif source_number is not None:
+            source = evidence[source_number - 1]
+            source_match = re.match(
+                r"^(\d{4}-\d{2}-\d{2}): \[([a-z]+)\] "
+                r"(?:\[basis: (direct|confirmation|inference)\] )?"
+                r"(?:\[sources: [^\]]+\] )?", source
+            )
+            if not source_match or source_match.group(1) != observed \
+                    or source_match.group(2) != kind:
+                report.error(
+                    path,
+                    f"capability source-evidence #{source_number} does not match "
+                    f"its [{kind}] {observed} citation",
+                )
+            elif source_match.group(3) == "inference":
+                report.error(path, "inferred evidence cannot establish a capability")
+        elif not any(item.startswith(f"{observed}: [{kind}]") for item in evidence):
             report.error(
                 path,
                 f"capability [{kind}] cites {observed}, but no matching evidence exists",
@@ -208,7 +238,8 @@ def check_concept(path, report, today):
     for index, line in enumerate(evidence, 1):
         match = re.match(
             r"^(\d{4}-\d{2}-\d{2}): \[(world|justification|modification)\] "
-            r"(?!\[basis: inference\])", line
+            r"(?!\[basis: inference\])(?:\[basis: (?:direct|confirmation)\] )?"
+            r"(?:\[sources: [^\]]+\] )?", line
         )
         if (match and index not in exact_covered
                 and match.groups() not in legacy_covered):
@@ -358,7 +389,8 @@ def main():
     all_concepts = laconic_index.load_concepts()
     cwds = {p for c in all_concepts for p in c.get("projects", ())} | {None}
     index_size = max(
-        len(laconic_index.render(all_concepts, cwd=cwd, today=today)) for cwd in cwds
+        len(laconic_index.render_hierarchy(all_concepts, cwd=cwd, today=today))
+        for cwd in cwds
     )
     if index_size > INDEX_BUDGET:
         report.warnings.append(

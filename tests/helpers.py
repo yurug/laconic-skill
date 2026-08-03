@@ -52,6 +52,14 @@ class ModelTestCase(unittest.TestCase):
         e = dict(os.environ)
         e["LACONIC_HOME"] = str(self.home)
         e["LACONIC_NO_PUSH"] = "1"
+        # Git may start automatic maintenance after a commit and outlive the recorder.
+        # Production repositories should keep that maintenance; isolated test repositories
+        # are deleted immediately, so a background pack races TemporaryDirectory cleanup.
+        e["GIT_CONFIG_COUNT"] = "2"
+        e["GIT_CONFIG_KEY_0"] = "gc.auto"
+        e["GIT_CONFIG_VALUE_0"] = "0"
+        e["GIT_CONFIG_KEY_1"] = "maintenance.auto"
+        e["GIT_CONFIG_VALUE_1"] = "false"
         e.update({k: str(v) for k, v in extra.items()})
         return e
 

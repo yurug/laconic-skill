@@ -90,6 +90,9 @@ Cutting noise is the point. The knowledge model below tells you what to leave ou
   skip it.
 - Uncertain? Explain more. Under-explaining is the costlier error; over-explaining is
   still an error. Adapt wording sooner than you adapt code. Never infer learning styles.
+- The prompt hook automatically loads relevant knowledge. Read another domain index only
+  after a routing miss, and a concept only for evidence/detail. Never ask the user to route
+  or maintain Laconic.
 POLICY_EOF
 
 # Only the main session observes the user directly. A subagent sees a task prompt, not
@@ -113,8 +116,9 @@ else
   is weak and audit-only (no state/capability).
   Never infer prerequisites or invent observations. Strong --kind values are
   world, justification, or modification. If one proves a reusable ability, add --capability.
-  For older proof, run ${MODEL_HOME}/bin/laconic-candidates and use --capability-from; never
-  duplicate evidence. Scope defaults to this project; widen it only with transfer evidence.
+  Review capability candidates yourself. Distil clear older proof with --capability-from;
+  never duplicate evidence. Leave ambiguity silently. Scope defaults to this project; widen
+  it only with transfer evidence.
   Record relations only when observed; retract obsolete abilities
   with --retract-capability and --reason. The default, term use, is weakest. A facet question becomes a gap via
   --not-established, not a whole-concept demotion. When the tool asks, distil with only

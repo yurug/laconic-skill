@@ -15,6 +15,7 @@ from laconic_lint import INDEX_BUDGET
 
 INJECT = REPO / "hooks-handlers" / "inject-policy.sh"
 STOP = REPO / "hooks-handlers" / "stop-check.sh"
+ROUTE = REPO / "hooks-handlers" / "route-knowledge.sh"
 
 class HookTestCase(ModelTestCase):
     def hook(self, script, *args, payload="{}", env=None):
@@ -36,8 +37,8 @@ class HookTestCase(ModelTestCase):
         return json.loads(proc.stdout)
 
 class TestInjectPolicy(HookTestCase):
-    EMPTY_CONTEXT_BUDGET = 2500
-    TOTAL_CONTEXT_BUDGET = 4200
+    EMPTY_CONTEXT_BUDGET = 2800
+    TOTAL_CONTEXT_BUDGET = 8000
 
     def test_session_start_envelope(self):
         env = self.envelope("SessionStart")
@@ -89,14 +90,18 @@ class TestInjectPolicy(HookTestCase):
     def test_lists_recorded_concepts(self):
         self.create("tezos-finality", domain="consensus")
         ctx = self.envelope("SessionStart")["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("tezos-finality", ctx)
+        self.assertIn("domain routes: consensus", ctx)
+        self.assertIn("tezos-finality", (self.home / "indexes" / "domains" /
+                                         "consensus.md").read_text())
 
     def test_injects_established_gaps(self):
         self.create("thing", domain="d")
         self.record("thing", "--state", "exposed", "--evidence", "two")
         self.record("thing", "--state", "exposed", "--evidence", "three")
         self.record("thing", "--not-established", "the failure modes")
-        ctx = self.envelope("SessionStart")["hookSpecificOutput"]["additionalContext"]
+        ctx = self.envelope(
+            "SessionStart", payload=json.dumps({"cwd": str(REPO)})
+        )["hookSpecificOutput"]["additionalContext"]
         self.assertIn("Established gaps", ctx)
         self.assertIn("the failure modes", ctx)
 
@@ -172,7 +177,32 @@ class TestSubagentPolicy(HookTestCase):
         self.create("tezos-finality", domain="consensus")
         ctx = self.envelope("SubagentStart")["hookSpecificOutput"]["additionalContext"]
         self.assertIn("Lead with the outcome", ctx)
-        self.assertIn("tezos-finality", ctx)
+        self.assertIn("domain routes: consensus", ctx)
+
+
+class TestPromptRouting(HookTestCase):
+    def test_relevant_domain_is_loaded_without_user_action(self):
+        self.create("rocq-proof-obligations", domain="formal-verification")
+        proc = self.hook(ROUTE, payload=json.dumps({
+            "prompt": "Can we discharge these Rocq obligations?", "cwd": str(REPO),
+        }))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        context = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Laconic automatic routes", context)
+        self.assertIn("formal-verification", context)
+        self.assertIn("rocq-proof-obligations", context)
+        self.assertLessEqual(len(context), 2800)
+
+    def test_unrelated_prompt_is_silent(self):
+        self.create("rocq-proof-obligations", domain="formal-verification")
+        proc = self.hook(ROUTE, payload=json.dumps({"prompt": "Hello there"}))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout, "")
+
+    def test_malformed_payload_is_silent(self):
+        proc = self.hook(ROUTE, payload="not json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout, "")
 
 class TestStopCheck(HookTestCase):
     def transcript(self, user_turns):

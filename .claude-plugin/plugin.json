@@ -1,6 +1,6 @@
 {
   "name": "laconic",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Cuts noise from agent communication. Maintains an auditable model of what you already know, and uses it to decide what to leave out.",
   "author": {
     "name": "Yann Régis-Gianas"

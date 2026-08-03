@@ -22,6 +22,10 @@ RECORD = TOOLS / "laconic_record.py"
 INDEX = TOOLS / "laconic_index.py"
 LINT = TOOLS / "laconic_lint.py"
 CANDIDATES = TOOLS / "laconic_candidates.py"
+BOOTSTRAP = TOOLS / "laconic_bootstrap.py"
+REVIEW = TOOLS / "laconic_review.py"
+REVIEW_WEB = TOOLS / "laconic_review_web.py"
+APPLY_REVIEW = TOOLS / "laconic_apply_review.py"
 
 sys.path.insert(0, str(TOOLS))
 

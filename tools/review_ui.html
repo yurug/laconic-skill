@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>laconic · revue du bootstrap</title>
+<style>
+:root{--bg:#f4f1ea;--paper:#fffdf8;--ink:#17201d;--muted:#68716d;--line:#dcd9d0;
+  --accent:#176b5b;--accept:#24795d;--reject:#a34d45;--warn:#a46b16;--soft:#ece9e0;
+  --mono:ui-monospace,"SFMono-Regular",Consolas,monospace;--sans:Inter,system-ui,sans-serif}
+@media(prefers-color-scheme:dark){:root{--bg:#111613;--paper:#18201c;--ink:#edf2ee;--muted:#9da8a2;
+  --line:#344039;--accent:#6ec6ae;--accept:#66bd96;--reject:#e18c83;--warn:#e0ae58;--soft:#222c27}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans)}
+button,input,select{font:inherit}button{cursor:pointer}.shell{max-width:1440px;margin:auto;padding:24px}
+header{display:grid;grid-template-columns:1fr auto;gap:24px;align-items:end;margin-bottom:18px}
+.eyebrow{font:700 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+h1{font:650 clamp(25px,3vw,38px)/1.08 var(--sans);letter-spacing:-.035em;margin:7px 0}
+.lede{margin:0;color:var(--muted);max-width:70ch}.progress{text-align:right;min-width:190px}
+.progress strong{display:block;font:650 28px/1 var(--mono)}.track{height:5px;background:var(--line);border-radius:5px;margin-top:8px}
+.track i{display:block;height:100%;background:var(--accent);border-radius:5px}
+.toolbar{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(10px);
+  border-block:1px solid var(--line);padding:10px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input[type=search],select{border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);padding:8px 10px}
+input[type=search]{min-width:250px;flex:1}.chip{border:1px solid var(--line);background:var(--paper);color:var(--muted);border-radius:999px;padding:7px 11px}
+.chip.active{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,var(--paper))}
+.main{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:18px;margin-top:18px}
+.stack{display:grid;gap:12px}.card{background:var(--paper);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.card[data-decision=accept]{border-left:5px solid var(--accept)}.card[data-decision=reject]{border-left:5px solid var(--reject)}
+.card.selected{outline:2px solid var(--accent);outline-offset:2px}.cardhead{padding:16px 18px 11px;display:flex;gap:10px;align-items:flex-start}
+.title{min-width:0;flex:1}.title h2{font:650 17px/1.25 var(--mono);margin:0;overflow-wrap:anywhere}.meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+.tag{font:600 11px/1 var(--mono);color:var(--muted);background:var(--soft);border-radius:99px;padding:5px 7px}
+.tag.warn{color:var(--warn)}.state{color:var(--accent)}.body{padding:0 18px 14px}.claim{font-size:16px;margin:4px 0 12px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.box{border-top:1px solid var(--line);padding-top:10px}.label{font:700 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.box p{margin:0;font-size:13px}.source{background:var(--soft);padding:11px;border-radius:8px;white-space:pre-wrap;max-height:130px;overflow:auto;font-size:13px}
+.warnings{margin:10px 0 0;padding-left:18px;color:var(--warn);font-size:13px}.actions{display:flex;gap:8px;padding:12px 18px;background:var(--soft);align-items:center}
+.decision{border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);padding:7px 13px}.decision.accept:hover,.decision.accept.on{border-color:var(--accept);color:var(--accept)}
+.decision.reject:hover,.decision.reject.on{border-color:var(--reject);color:var(--reject)}.decision.clear{margin-left:auto;color:var(--muted)}
+.side{position:sticky;top:74px;align-self:start;display:grid;gap:12px}.panel{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:15px}
+.panel h3{font:650 13px/1.2 var(--mono);margin:0 0 10px}.stats{display:grid;grid-template-columns:1fr 1fr;gap:7px}.stat{background:var(--soft);border-radius:8px;padding:9px}.stat b{display:block;font:650 18px/1 var(--mono)}.stat span{font-size:11px;color:var(--muted)}
+.help{font-size:12px;color:var(--muted);margin:0}.kbd{font:11px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 4px;color:var(--ink)}
+.ready{color:var(--accept)}.notready{color:var(--warn)}code{font:12px/1.45 var(--mono);overflow-wrap:anywhere}.empty{text-align:center;color:var(--muted);padding:50px}
+details{margin-top:8px}summary{cursor:pointer;color:var(--accent);font-size:12px}.existing{font-size:12px;color:var(--muted);margin-top:8px}.toast{position:fixed;right:20px;bottom:20px;background:var(--ink);color:var(--paper);padding:9px 13px;border-radius:8px;opacity:0;transition:.2s}.toast.show{opacity:1}
+@media(max-width:900px){.main{grid-template-columns:1fr}.side{position:static;order:-1}.grid{grid-template-columns:1fr}header{grid-template-columns:1fr}.progress{text-align:left}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header><div><div class="eyebrow">laconic · bootstrap review</div><h1>Décider, sans surinterpréter</h1><p class="lede">Chaque carte est une proposition, pas un fait. Vérifie la preuve, son attribution et la différence avec le modèle actuel avant de l’accepter.</p></div><div class="progress" id="progress"></div></header>
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="Rechercher concept, domaine, preuve…">
+    <button class="chip active" data-filter="pending">À décider</button>
+    <button class="chip" data-filter="warning">Alertes</button>
+    <button class="chip" data-filter="accepted">Acceptés</button>
+    <button class="chip" data-filter="rejected">Rejetés</button>
+    <button class="chip" data-filter="all">Tous</button>
+    <select id="domain"><option value="">Tous les domaines</option></select>
+  </div>
+  <div class="main"><main class="stack" id="cards"></main><aside class="side" id="side"></aside></div>
+</div><div class="toast" id="toast"></div>
+<script>
+let DATA={proposals:[]},filter="pending",selected=0;
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const counts=()=>DATA.proposals.reduce((a,p)=>(a[p.decision||"pending"]++,a),{pending:0,accept:0,reject:0});
+function visible(){const q=document.querySelector("#search").value.trim().toLowerCase(),d=document.querySelector("#domain").value;return DATA.proposals.filter(p=>{
+  const matchFilter=filter==="all"||(filter==="pending"&&!p.decision)||(filter==="accepted"&&p.decision==="accept")||(filter==="rejected"&&p.decision==="reject")||(filter==="warning"&&p.duplicate_warnings.length);
+  const hay=[p.concept_id,p.domain,p.evidence,p.attribution_rationale,p.source.text].join(" ").toLowerCase();return matchFilter&&(!d||p.domain===d)&&(!q||hay.includes(q));});}
+function renderProgress(){const c=counts(),done=c.accept+c.reject,total=DATA.proposals.length,pct=total?Math.round(done*100/total):100;document.querySelector("#progress").innerHTML=`<strong>${done}/${total}</strong><span>${pct}% décidé</span><div class="track"><i style="width:${pct}%"></i></div>`;}
+function card(p,i){const existing=p.existing?`<details><summary>Comparer au concept existant · ${esc(p.existing.state||"illisible")}</summary><div class="existing">${esc(p.existing.summary||"")}<br>${(p.existing.evidence||[]).slice(-3).map(esc).join("<br>")}</div></details>`:"<div class='existing'>Nouveau concept</div>";
+ const warning=p.duplicate_warnings.length?`<ul class="warnings">${p.duplicate_warnings.map(w=>`<li>${esc(w)}</li>`).join("")}</ul>`:"";
+ return `<article class="card${i===selected?" selected":""}" data-id="${p.proposal_id}" data-decision="${p.decision||""}"><div class="cardhead"><div class="title"><h2>${esc(p.concept_id)}</h2><div class="meta"><span class="tag">${esc(p.domain)}</span><span class="tag state">${esc(p.state||"état inchangé")}</span><span class="tag">${esc(p.basis)} · ${esc(p.kind)}</span>${p.duplicate_warnings.length?`<span class="tag warn">⚠ doublon possible</span>`:""}</div></div></div><div class="body"><p class="claim">${esc(p.evidence)}</p><div class="grid"><div class="box"><div class="label">Pourquoi c’est attribué à toi</div><p>${esc(p.attribution_rationale)}</p>${existing}${warning}</div><div class="box"><div class="label">Source · ${esc(p.source.project)} · ${esc((p.source.timestamp||"").slice(0,10))}</div><div class="source">${esc(p.source.text)}</div></div></div>${p.capability?`<div class="box"><div class="label">Capacité proposée</div><p>${esc(p.capability.claim)}${p.capability.condition?` — si ${esc(p.capability.condition)}`:""}</p></div>`:""}${p.not_established?`<div class="box"><div class="label">Non établi</div><p>${esc(p.not_established)}</p></div>`:""}</div><div class="actions"><button class="decision accept${p.decision==="accept"?" on":""}" data-d="accept">A · Accepter</button><button class="decision reject${p.decision==="reject"?" on":""}" data-d="reject">R · Rejeter</button>${p.decision?`<button class="decision clear" data-d="">Annuler la décision</button>`:""}</div></article>`;}
+function render(){renderProgress();const ps=visible();if(selected>=ps.length)selected=Math.max(0,ps.length-1);document.querySelector("#cards").innerHTML=ps.length?ps.map(card).join(""):`<div class="empty">Aucune proposition dans cette vue.</div>`;const c=counts(),ready=c.pending===0;document.querySelector("#side").innerHTML=`<section class="panel"><h3>État de la revue</h3><div class="stats"><div class="stat"><b>${c.pending}</b><span>à décider</span></div><div class="stat"><b>${c.accept}</b><span>acceptés</span></div><div class="stat"><b>${c.reject}</b><span>rejetés</span></div><div class="stat"><b>${DATA.proposals.filter(p=>p.duplicate_warnings.length).length}</b><span>alertes</span></div></div><p class="${ready?"ready":"notready"}">${ready?"Toutes les propositions ont une décision.":"L’application refusera une revue incomplète."}</p></section><section class="panel"><h3>Raccourcis</h3><p class="help"><span class="kbd">J</span>/<span class="kbd">K</span> naviguer · <span class="kbd">A</span> accepter · <span class="kbd">R</span> rejeter · <span class="kbd">U</span> annuler</p></section><section class="panel"><h3>Après la revue</h3><p class="help">Les décisions sont sauvegardées dans<br><code>${esc(DATA.decisions_path)}</code></p>${ready?`<details><summary>Commande d’application</summary><code>${esc(DATA.apply_command)}</code></details>`:""}</section>`;scrollSelected(false);}
+function toast(t){const e=document.querySelector("#toast");e.textContent=t;e.classList.add("show");setTimeout(()=>e.classList.remove("show"),1200)}
+async function decide(id,decision){const r=await fetch("/api/decision",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({proposal_id:id,decision:decision||null})});const j=await r.json();if(!r.ok)return toast(j.error||"Échec");const p=DATA.proposals.find(x=>x.proposal_id===id);p.decision=decision||null;toast("Décision sauvegardée");render();}
+function scrollSelected(move=true){const cards=[...document.querySelectorAll(".card")];cards.forEach((c,i)=>c.classList.toggle("selected",i===selected));if(move&&cards[selected])cards[selected].scrollIntoView({block:"center",behavior:"smooth"});}
+document.addEventListener("click",e=>{const chip=e.target.closest("[data-filter]");if(chip){filter=chip.dataset.filter;document.querySelectorAll("[data-filter]").forEach(x=>x.classList.toggle("active",x===chip));selected=0;render();return}const b=e.target.closest("[data-d]");if(b){const c=b.closest(".card");decide(c.dataset.id,b.dataset.d);}});
+document.querySelector("#search").addEventListener("input",()=>{selected=0;render()});document.querySelector("#domain").addEventListener("change",()=>{selected=0;render()});
+document.addEventListener("keydown",e=>{if(e.target.matches("input,select"))return;const ps=visible();if(!ps.length)return;if(e.key.toLowerCase()==="j")selected=Math.min(ps.length-1,selected+1);else if(e.key.toLowerCase()==="k")selected=Math.max(0,selected-1);else if(["a","r","u"].includes(e.key.toLowerCase())){const p=ps[selected];return decide(p.proposal_id,{a:"accept",r:"reject",u:""}[e.key.toLowerCase()]);}else return;scrollSelected();});
+fetch("/api/review").then(r=>r.json()).then(data=>{DATA=data;const ds=[...new Set(DATA.proposals.map(p=>p.domain))].sort();document.querySelector("#domain").innerHTML+=ds.map(d=>`<option>${esc(d)}</option>`).join("");render()});
+</script>
+</body></html>

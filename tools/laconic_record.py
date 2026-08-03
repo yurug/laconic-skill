@@ -77,6 +77,7 @@ EVIDENCE_KINDS = ["term", "world", "justification", "modification"]
 THEORY_KINDS = {"world", "justification", "modification"}
 KIND_RE = re.compile(r"^\[([a-z]+)\]\s*")
 BASIS_RE = re.compile(r"^\[basis: (direct|confirmation|inference)\]\s*")
+SOURCE_RE = re.compile(r"^\[sources: ([^\]]+)\]\s*")
 EVIDENCE_BASES = ("direct", "confirmation", "inference")
 
 DEFAULT_CONFIDENCE = {"unknown": 0.1, "exposed": 0.3, "familiar": 0.55, "verified": 0.85}
@@ -147,6 +148,7 @@ IGNORED = [
     ".laconic-tmp-*",
     "laconic.lock",
     "bin/",
+    "indexes/",
 ]
 
 
@@ -571,6 +573,8 @@ def main():
         "--basis", choices=EVIDENCE_BASES, default=None,
         help="how the claim was obtained; weak inference is logged but cannot change state",
     )
+    ap.add_argument("--source-ref", default=None,
+                    help="comma-separated transcript:<sha256> audit references")
     ap.add_argument(
         "--capability",
         default=None,
@@ -667,6 +671,7 @@ def main():
             "--summary": args.summary,
             "--basis": args.basis if args.basis != "direct" else None,
             "--confirmed": args.confirmed or None,
+            "--source-ref": args.source_ref,
         }
         used = sorted(k for k, v in conflicts.items() if v is not None)
         if used:
@@ -695,6 +700,7 @@ def main():
             "--capability-from": args.capability_from,
             "--basis": args.basis if args.basis != "direct" else None,
             "--confirmed": args.confirmed or None,
+            "--source-ref": args.source_ref,
         }
         used = sorted(key for key, value in conflicts.items() if value is not None)
         if used:
@@ -712,6 +718,13 @@ def main():
         ap.error("--basis inference cannot establish a capability")
     if args.basis == "inference" and args.confidence is not None:
         ap.error("--basis inference cannot set confidence")
+    if args.source_ref is not None:
+        refs = [item.strip() for item in args.source_ref.split(",") if item.strip()]
+        if not refs or len(refs) != len(set(refs)) or any(
+                not re.fullmatch(r"transcript:[0-9a-f]{64}", item) for item in refs):
+            ap.error("--source-ref expects unique transcript:<sha256> references")
+        if args.evidence is None:
+            ap.error("--source-ref requires --evidence")
 
     distil_only = args.forget is None and args.evidence is None
     if (distil_only and args.understands is None and args.not_established is None
@@ -844,6 +857,8 @@ def apply_record(args, today, quiet=False):
     basis = getattr(args, "basis", None) or (
         "confirmation" if getattr(args, "confirmed", False) else "direct"
     )
+    source_refs = [item.strip() for item in
+                   (getattr(args, "source_ref", None) or "").split(",") if item.strip()]
     capability_id = getattr(args, "capability_id", None)
     capability_relations = {
         name: [ref.strip() for ref in (getattr(args, f"capability_{name}", None) or "").split(",")
@@ -884,8 +899,10 @@ def apply_record(args, today, quiet=False):
         # line cannot end up marked twice.
         evidence_text = KIND_RE.sub("", evidence_text)
         evidence_text = BASIS_RE.sub("", evidence_text)
+        evidence_text = SOURCE_RE.sub("", evidence_text)
         basis_marker = f"[basis: {basis}] " if basis != "direct" else ""
-        evidence_text = f"[{args.kind}] {basis_marker}{evidence_text}"
+        source_marker = f"[sources: {', '.join(source_refs)}] " if source_refs else ""
+        evidence_text = f"[{args.kind}] {basis_marker}{source_marker}{evidence_text}"
 
     if path.exists():
         meta, evidence, body = parse_existing(path)
@@ -992,7 +1009,8 @@ def apply_record(args, today, quiet=False):
             source = evidence[capability_from - 1]
             source_match = re.match(
                 r"^(\d{4}-\d{2}-\d{2}): \[(world|justification|modification)\] "
-                r"(?:\[basis: (direct|confirmation|inference)\] )?", source
+                r"(?:\[basis: (direct|confirmation|inference)\] )?"
+                r"(?:\[sources: [^\]]+\] )?", source
             )
             if not source_match:
                 print(

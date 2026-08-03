@@ -536,7 +536,8 @@ class TestScratchFilesStayLocal(ModelTestCase):
     def test_gitignore_covers_the_scratch_files(self):
         self.create("thing")
         ignored = (self.home / ".gitignore").read_text(encoding="utf-8").split()
-        for pattern in (".lint-ok", ".nudged-*", ".session-*", "laconic.lock"):
+        for pattern in (".lint-ok", ".nudged-*", ".session-*", "laconic.lock",
+                        "indexes/"):
             self.assertIn(pattern, ignored)
 
     def test_patterns_reach_a_model_that_already_exists(self):
@@ -765,6 +766,20 @@ class TestEvidenceKinds(ModelTestCase):
                     evidence="proposed a change that fitted the existing design")
         self.assertEqual(self.kinds("thing"), ["modification"])
 
+    def test_records_and_lints_an_opaque_transcript_source(self):
+        digest = "a" * 64
+        self.create("thing", "--source-ref", f"transcript:{digest}")
+        self.assertIn(f"[sources: transcript:{digest}]", self.evidence_lines("thing")[0])
+        self.assertEqual(self.lint().code, 0)
+
+    def test_rejects_a_malformed_transcript_source(self):
+        r = self.record(
+            "thing", "--state", "exposed", "--domain", "testing", "--evidence", "seen",
+            "--source-ref", "transcript:not-a-hash",
+        )
+        self.assertEqual(r.code, 2, r.text)
+        self.assertIn("transcript:<sha256>", r.text)
+
     def test_rejects_an_unknown_kind(self):
         r = self.record("thing", "--state", "exposed", "--domain", "testing",
                         "--evidence", "x", "--kind", "vibes")
@@ -937,6 +952,47 @@ class TestCapabilities(ModelTestCase):
         r = self.lint()
         self.assertEqual(r.code, 1, r.text)
         self.assertIn("no matching evidence", r.text)
+
+    def test_lint_rejects_an_out_of_range_capability_source(self):
+        self.create("thing", "--kind", "world", evidence="mapped the system")
+        self.record("thing", "--capability-from", "1", "--capability", "Can map it")
+        text = self.read("thing").replace("[source-evidence: 1]", "[source-evidence: 9]")
+        self.path("thing").write_text(text, encoding="utf-8")
+        r = self.lint()
+        self.assertEqual(r.code, 1, r.text)
+        self.assertIn("source-evidence #9 exceeds", r.text)
+
+    def test_lint_rejects_a_capability_source_with_wrong_kind_or_date(self):
+        self.create(
+            "thing", "--kind", "world", "--date", "2026-08-01",
+            evidence="mapped the system",
+        )
+        self.record(
+            "thing", "--state", "familiar", "--kind", "justification",
+            "--date", "2026-08-02", "--evidence", "justified the design",
+        )
+        self.record("thing", "--capability-from", "1", "--capability", "Can map it")
+        text = self.read("thing").replace("[source-evidence: 1]", "[source-evidence: 2]")
+        self.path("thing").write_text(text, encoding="utf-8")
+        r = self.lint()
+        self.assertEqual(r.code, 1, r.text)
+        self.assertIn("does not match", r.text)
+
+    def test_lint_rejects_inference_as_a_manually_linked_capability_source(self):
+        self.create(
+            "thing", "--kind", "world", "--basis", "inference",
+            "--date", "2026-08-03", state="unknown", evidence="might map it",
+        )
+        text = self.read("thing").replace(
+            "## Established capabilities\n\n",
+            "## Established capabilities\n"
+            "- [world] Can map it (evidence: 2026-08-03) [scope: project] "
+            "[id: can-map-it] [source-evidence: 1]\n\n",
+        )
+        self.path("thing").write_text(text, encoding="utf-8")
+        r = self.lint()
+        self.assertEqual(r.code, 1, r.text)
+        self.assertIn("inferred evidence cannot establish", r.text)
 
     def test_pre_capability_spool_entry_still_replays(self):
         import argparse

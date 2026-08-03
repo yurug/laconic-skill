@@ -121,6 +121,11 @@ Three rules matter often enough to state here:
   gap (`--not-established`) and leave `state` alone. Demote only when the central mechanism
   is in doubt.
 - **Never invent evidence.** No dated observation you can cite means the state is `unknown`.
+- **Name how you know.** Direct observation is the default. Use `--basis confirmation` only
+  for an explicit user confirmation. Mark a useful but weak inference with `--basis
+  inference`; the recorder retains it for audit but prevents it from changing state,
+  confidence, or capabilities. Omit `--state` for inference; the recorder preserves the
+  current state (or uses `unknown` for a new concept).
 - **Record demonstrated abilities, not flattering summaries.** When `--kind world`,
   `justification`, or `modification` shows a reusable ability, add `--capability "what the
   user can do"`. Keep the claim narrower than the observation. Leave its scope at the safe

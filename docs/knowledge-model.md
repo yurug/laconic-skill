@@ -67,6 +67,13 @@ three record Peter Naur's criteria for possessing the theory of a system; they a
 separately because repeating vocabulary is weaker evidence than mapping a design to the
 world, explaining why it exists, or modifying it coherently.
 
+Evidence also records provenance. `direct` is the backward-compatible default;
+`confirmation` means the user explicitly confirmed the claim; `inference` marks a useful
+but indirect signal. Inference is audit-only: it cannot change state or confidence, count
+toward `verified`, become a capability, or appear as a capability candidate. Use
+`--basis confirmation` or `--basis inference`; direct evidence carries no extra marker.
+Inference may omit `--state`, preserving the current value or using `unknown` on creation.
+
 A strong observation can establish a reusable capability in the same write:
 
 ```bash

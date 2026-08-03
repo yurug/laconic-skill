@@ -24,7 +24,8 @@ def main():
     print("Capability candidates (evidence is not a capability claim):")
     for item in candidates:
         concept = shlex.quote(item["id"])
-        print(f"\n{item['id']} evidence #{item['index']} [{item['kind']}, {item['date']}]")
+        print(f"\n{item['id']} evidence #{item['index']} "
+              f"[{item['kind']}, {item.get('basis', 'direct')}, {item['date']}]")
         print(f"  {item['text']}")
         print(
             "  distil: ~/.laconic/bin/laconic-record "

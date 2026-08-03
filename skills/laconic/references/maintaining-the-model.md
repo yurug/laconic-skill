@@ -85,7 +85,23 @@ Promotion is slow, demotion is fast. One data point moves `confidence`; only rep
 decisive evidence moves `state`. Abrupt shifts in register disorient the reader.
 
 The tool enforces this: one observation moves one step, and `verified` needs a second
-independent observation unless you pass `--confirmed`.
+independent observation unless you pass `--basis confirmation`. The legacy `--confirmed`
+flag remains an alias.
+
+## Evidence provenance
+
+Record how the claim was obtained independently of what it demonstrates:
+
+| basis | meaning | mechanical effect |
+|---|---|---|
+| `direct` | behavior observed in the user's own words or work | normal promotion rules |
+| `confirmation` | the user explicitly confirmed the knowledge claim | may reach `verified` immediately |
+| `inference` | a plausible but indirect signal | audit-only; cannot change state or confidence |
+
+Direct is the default and stays unmarked for backward compatibility. The other two appear as
+`[basis: confirmation]` or `[basis: inference]` on the evidence line. Inferred evidence
+cannot establish a capability, including through `--capability-from`. Omit `--state` when
+recording inference; the current state is preserved, or a new concept starts at `unknown`.
 
 ## The two prose sections
 

@@ -240,13 +240,15 @@ def parse_frontmatter(path):
             evidence_count += 1
             evidence = line[2:].strip()
             match = re.match(
-                r"^(\d{4}-\d{2}-\d{2}): \[(world|justification|modification)\] (.+)$",
+                r"^(\d{4}-\d{2}-\d{2}): \[(world|justification|modification)\] "
+                r"(?:\[basis: (direct|confirmation|inference)\] )?(.+)$",
                 evidence,
             )
             if match:
                 strong_evidence.append({
                     "index": evidence_count, "date": match.group(1),
-                    "kind": match.group(2), "text": match.group(3),
+                    "kind": match.group(2), "basis": match.group(3) or "direct",
+                    "text": match.group(4),
                 })
             continue
         if ":" not in line:
@@ -499,7 +501,8 @@ def select_capability_candidates(concepts, cwd):
                   for item in concept.get("capabilities", ())
                   if item.get("source_evidence") is None}
         for evidence in concept.get("strong_evidence", ()):
-            if (evidence["index"] not in exact
+            if (evidence.get("basis", "direct") != "inference"
+                    and evidence["index"] not in exact
                     and (evidence["date"], evidence["kind"]) not in legacy):
                 candidates.append({**evidence, "id": concept["id"]})
     return sorted(candidates, key=lambda item: (item["id"], item["index"]))

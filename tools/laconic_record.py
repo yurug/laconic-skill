@@ -76,6 +76,8 @@ LEADING_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}:?\s+")
 EVIDENCE_KINDS = ["term", "world", "justification", "modification"]
 THEORY_KINDS = {"world", "justification", "modification"}
 KIND_RE = re.compile(r"^\[([a-z]+)\]\s*")
+BASIS_RE = re.compile(r"^\[basis: (direct|confirmation|inference)\]\s*")
+EVIDENCE_BASES = ("direct", "confirmation", "inference")
 
 DEFAULT_CONFIDENCE = {"unknown": 0.1, "exposed": 0.3, "familiar": 0.55, "verified": 0.85}
 
@@ -566,6 +568,10 @@ def main():
         help="what kind of evidence this is; the last three are Naur's theory criteria",
     )
     ap.add_argument(
+        "--basis", choices=EVIDENCE_BASES, default=None,
+        help="how the claim was obtained; weak inference is logged but cannot change state",
+    )
+    ap.add_argument(
         "--capability",
         default=None,
         help="ability demonstrated by this evidence; requires world, justification, or modification",
@@ -627,6 +633,12 @@ def main():
     ap.add_argument("--date", default=None, help="ISO date; defaults to today")
     args = ap.parse_args()
 
+    if args.confirmed and args.basis not in (None, "confirmation"):
+        ap.error("--confirmed conflicts with --basis direct or inference")
+    if args.confirmed:
+        args.basis = "confirmation"
+    args.basis = args.basis or "direct"
+
     if args.forget is not None:
         # Forgetting is the one operation that asserts nothing, so it combines with
         # nothing: a call that both deleted a concept and recorded evidence about it
@@ -653,6 +665,8 @@ def main():
             "--confidence": args.confidence,
             "--depends-on": args.depends_on,
             "--summary": args.summary,
+            "--basis": args.basis if args.basis != "direct" else None,
+            "--confirmed": args.confirmed or None,
         }
         used = sorted(k for k, v in conflicts.items() if v is not None)
         if used:
@@ -679,6 +693,8 @@ def main():
             "--capability-contradicts": args.capability_contradicts,
             "--capability-valid-until": args.capability_valid_until,
             "--capability-from": args.capability_from,
+            "--basis": args.basis if args.basis != "direct" else None,
+            "--confirmed": args.confirmed or None,
         }
         used = sorted(key for key, value in conflicts.items() if value is not None)
         if used:
@@ -692,13 +708,18 @@ def main():
     elif args.reason is not None:
         ap.error("--reason only applies to --retract-capability")
 
+    if args.basis == "inference" and args.capability is not None:
+        ap.error("--basis inference cannot establish a capability")
+    if args.basis == "inference" and args.confidence is not None:
+        ap.error("--basis inference cannot set confidence")
+
     distil_only = args.forget is None and args.evidence is None
     if (distil_only and args.understands is None and args.not_established is None
             and args.capability is None and args.retract_capability is None):
         ap.error("--evidence is required unless you pass --understands or --not-established")
-    if (args.state is None and not distil_only and args.forget is None
+    if (args.state is None and args.basis != "inference" and not distil_only and args.forget is None
             and args.retract_capability is None):
-        ap.error("--state is required when recording an observation")
+        ap.error("--state is required for direct or confirmed observations")
     if args.capability is not None:
         if args.evidence is None and args.capability_from is None:
             ap.error("--capability requires --evidence or --capability-from")
@@ -820,6 +841,9 @@ def apply_record(args, today, quiet=False):
     capability_condition = getattr(args, "capability_condition", None) or ""
     capability_valid_until = getattr(args, "capability_valid_until", None) or ""
     capability_from = getattr(args, "capability_from", None)
+    basis = getattr(args, "basis", None) or (
+        "confirmation" if getattr(args, "confirmed", False) else "direct"
+    )
     capability_id = getattr(args, "capability_id", None)
     capability_relations = {
         name: [ref.strip() for ref in (getattr(args, f"capability_{name}", None) or "").split(",")
@@ -858,7 +882,10 @@ def apply_record(args, today, quiet=False):
     if evidence_text is not None:
         # Strip a kind the caller wrote by hand, so `--kind` stays the single source and the
         # line cannot end up marked twice.
-        evidence_text = f"[{args.kind}] {KIND_RE.sub('', evidence_text)}"
+        evidence_text = KIND_RE.sub("", evidence_text)
+        evidence_text = BASIS_RE.sub("", evidence_text)
+        basis_marker = f"[basis: {basis}] " if basis != "direct" else ""
+        evidence_text = f"[{args.kind}] {basis_marker}{evidence_text}"
 
     if path.exists():
         meta, evidence, body = parse_existing(path)
@@ -898,19 +925,23 @@ def apply_record(args, today, quiet=False):
 
     # A distil-only call asserts nothing new about the state, so it inherits it.
     requested = args.state or prior
+    if basis == "inference" and not distil_only:
+        requested = prior
 
     # Promotion is slow, demotion is fast. Under-explaining is the costlier error, so
     # reaching 'verified' takes repeated evidence unless the user confirmed outright.
     final = requested
     note = ""
     if RANK[requested] > RANK[prior]:
-        if requested == "verified" and len(evidence) < 2 and not args.confirmed:
+        qualifying = sum("[basis: inference]" not in item for item in evidence)
+        confirmed = basis == "confirmation"
+        if requested == "verified" and qualifying < 2 and not confirmed:
             final = "familiar"
             note = (
                 "  note: held at 'familiar' — 'verified' needs a second independent "
                 "observation, or --confirmed"
             )
-        if RANK[requested] - RANK[prior] > 1 and not args.confirmed:
+        if RANK[requested] - RANK[prior] > 1 and not confirmed:
             capped = STATES[RANK[prior] + 1]
             if RANK[capped] < RANK[final]:
                 final = capped
@@ -927,7 +958,7 @@ def apply_record(args, today, quiet=False):
     # last-updated: resetting confidence would discard a tuned value, and bumping the date
     # would reset the staleness clock without a new observation behind it.
     conf = args.confidence
-    if conf is None and not distil_only:
+    if conf is None and not distil_only and basis != "inference":
         conf = DEFAULT_CONFIDENCE[final]
     if conf is not None:
         meta["confidence"] = f"{max(0.0, min(1.0, conf)):.2f}"
@@ -960,7 +991,8 @@ def apply_record(args, today, quiet=False):
                 return 2
             source = evidence[capability_from - 1]
             source_match = re.match(
-                r"^(\d{4}-\d{2}-\d{2}): \[(world|justification|modification)\] ", source
+                r"^(\d{4}-\d{2}-\d{2}): \[(world|justification|modification)\] "
+                r"(?:\[basis: (direct|confirmation|inference)\] )?", source
             )
             if not source_match:
                 print(
@@ -969,7 +1001,10 @@ def apply_record(args, today, quiet=False):
                     file=sys.stderr,
                 )
                 return 2
-            capability_date, capability_kind = source_match.groups()
+            capability_date, capability_kind, source_basis = source_match.groups()
+            if source_basis == "inference":
+                print("error: inferred evidence cannot establish a capability", file=sys.stderr)
+                return 2
             if capability_valid_until and capability_valid_until < capability_date:
                 print("error: capability expiry precedes its source evidence", file=sys.stderr)
                 return 2

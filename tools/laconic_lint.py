@@ -15,9 +15,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from laconic_index import (  # noqa: E402
+    CAPABILITIES,
+    CAPABILITY_EXTENDED_RE,
+    CAPABILITY_REF_RE,
     NOT_ESTABLISHED,
     STATES,
     SUMMARY_AFTER,
+    get_section,
     parse_frontmatter,
 )
 from laconic_record import EVIDENCE_KINDS, KIND_RE  # noqa: E402
@@ -46,7 +50,7 @@ STALE_DAYS = 180
 # Sized to what the design actually renders in its worst project-scoped case, not to an
 # aspiration. A broad cwd does not make every child project relevant: relevance is directional
 # precisely so a session in ~/ cannot inline the whole model.
-INDEX_BUDGET = 1700
+INDEX_BUDGET = 1850
 
 
 class Report:
@@ -137,6 +141,44 @@ def check_concept(path, report, today):
             report.error(path, f"unknown evidence kind '[{m.group(1)}]', "
                                f"expected one of {EVIDENCE_KINDS}")
 
+    body = text.split("\n---", 1)[1] if "\n---" in text else ""
+    capability_lines = [
+        line.strip() for line in get_section(body, CAPABILITIES).splitlines() if line.strip()
+    ]
+    parsed_capabilities = []
+    for line in capability_lines:
+        match = CAPABILITY_EXTENDED_RE.fullmatch(line)
+        if not match:
+            report.error(path, f"malformed capability claim: {line[:60]}")
+            continue
+        parsed_capabilities.append(match.groups())
+        kind, _, observed = match.group(1), match.group(2), match.group(3)
+        if not any(item.startswith(f"{observed}: [{kind}]") for item in evidence):
+            report.error(
+                path,
+                f"capability [{kind}] cites {observed}, but no matching evidence exists",
+            )
+        valid_until, retracted, reason = match.group(6), match.group(12), match.group(13)
+        if valid_until:
+            try:
+                expiry = date.fromisoformat(valid_until)
+                if expiry < date.fromisoformat(observed):
+                    report.error(path,
+                                 f"capability expires before its evidence date ({valid_until})")
+            except ValueError:
+                report.error(path, f"capability expiry '{valid_until}' is not a real date")
+        if retracted:
+            try:
+                retraction_date = date.fromisoformat(retracted)
+                if retraction_date > today:
+                    report.error(path, f"capability retraction '{retracted}' is in the future")
+            except ValueError:
+                report.error(path, f"capability retraction '{retracted}' is not a real date")
+            if not reason:
+                report.error(path, "retracted capability has no retraction reason")
+        elif reason:
+            report.error(path, "capability has a retraction reason but no retraction date")
+
     # Credentials in a committed file. An error, not a warning: a configured remote could
     # sync it while someone decided what to do about it.
     for label, pattern in SECRET_PATTERNS:
@@ -155,6 +197,22 @@ def check_concept(path, report, today):
             path,
             f"{len(evidence)} observations, no '{NOT_ESTABLISHED}' section — distil it "
             f"with laconic_record.py --not-established so the gap reaches the injection",
+        )
+    exact_covered = {int(groups[10]) for groups in parsed_capabilities if groups[10]}
+    legacy_covered = {(groups[2], groups[0]) for groups in parsed_capabilities if not groups[10]}
+    strong = []
+    for index, line in enumerate(evidence, 1):
+        match = re.match(
+            r"^(\d{4}-\d{2}-\d{2}): \[(world|justification|modification)\] ", line
+        )
+        if (match and index not in exact_covered
+                and match.groups() not in legacy_covered):
+            strong.append(index)
+    if strong:
+        report.warn(
+            path,
+            f"{len(strong)} undistilled strong observation(s), including evidence "
+            f"#{strong[0]} — review with laconic-candidates",
         )
 
     concept_id = meta.get("id")
@@ -193,6 +251,58 @@ def check_graph(metas, report, paths_by_id):
             visit(cid, [])
 
 
+def check_capability_graph(metas, report, paths_by_id):
+    """Validate capability identity and relations independently of concept dependencies."""
+    capabilities = {}
+    for concept_id, meta in metas.items():
+        local = set()
+        for capability in meta.get("_capabilities", ()):
+            capability_id = capability["capability_id"]
+            ref = f"{concept_id}/{capability_id}"
+            if capability_id in local:
+                report.error(paths_by_id[concept_id], f"duplicate capability id '{capability_id}'")
+            local.add(capability_id)
+            capabilities[ref] = (concept_id, capability)
+
+    for ref, (concept_id, capability) in capabilities.items():
+        relations = set()
+        for relation in ("requires", "supersedes", "contradicts"):
+            for target in capability.get(relation, ()):
+                if not CAPABILITY_REF_RE.fullmatch(target):
+                    report.error(paths_by_id[concept_id],
+                                 f"{relation} has invalid capability reference '{target}'")
+                elif target not in capabilities:
+                    report.error(paths_by_id[concept_id],
+                                 f"{relation} capability '{target}' does not exist")
+                if target == ref:
+                    report.error(paths_by_id[concept_id], f"capability '{ref}' {relation} itself")
+                if target in relations:
+                    report.error(paths_by_id[concept_id],
+                                 f"capability '{ref}' relates to '{target}' in multiple ways")
+                relations.add(target)
+
+    WHITE, GREY, BLACK = 0, 1, 2
+    colour = {ref: WHITE for ref in capabilities}
+
+    def visit(ref, stack):
+        if colour[ref] == GREY:
+            cycle = " -> ".join(stack[stack.index(ref):] + [ref])
+            concept_id = capabilities[ref][0]
+            report.error(paths_by_id[concept_id], f"capability prerequisite cycle: {cycle}")
+            return
+        if colour[ref] == BLACK:
+            return
+        colour[ref] = GREY
+        for required in capabilities[ref][1].get("requires", ()):
+            if required in capabilities:
+                visit(required, stack + [ref])
+        colour[ref] = BLACK
+
+    for ref in sorted(capabilities):
+        if colour[ref] == WHITE:
+            visit(ref, [])
+
+
 def main():
     ap = argparse.ArgumentParser(description="Validate the laconic knowledge model.")
     ap.add_argument(
@@ -226,6 +336,7 @@ def main():
         paths_by_id[cid] = path
 
     check_graph(metas, report, paths_by_id)
+    check_capability_graph(metas, report, paths_by_id)
 
     # Token discipline, made mechanical so it cannot regress unnoticed.
     os.environ["LACONIC_HOME"] = args.home

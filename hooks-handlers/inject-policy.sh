@@ -110,8 +110,12 @@ else
 - Record evidence with the tool -- never hand-write these files, they have a schema:
   ${RECORD_CMD} <id> --state <unknown|exposed|familiar|verified> --domain <subject> --evidence "what you saw"
   Domain is required on creation. Record only direct evidence; never infer prerequisites or
-  invent observations. Mark stronger evidence with --kind world, justification, or
-  modification; the default, term use, is weakest. A facet question becomes a gap via
+  invent observations. Classify strong evidence with --kind world, justification, or
+  modification. If it proves a reusable ability, add --capability "what the user can do".
+  For older proof, run ${MODEL_HOME}/bin/laconic-candidates and use --capability-from; never
+  duplicate evidence. Scope defaults to this project; widen it only with transfer evidence.
+  Record relations only when observed; retract obsolete abilities
+  with --retract-capability and --reason. The default, term use, is weakest. A facet question becomes a gap via
   --not-established, not a whole-concept demotion. When the tool asks, distil with only
   --not-established (optionally --understands): a summary is not evidence. Describe rather
   than quote; never store secrets or confidential text. Writes are committed locally and

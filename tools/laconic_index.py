@@ -35,6 +35,28 @@ EXPOSED_DROP_DAYS = 90
 # would be circular.
 UNDERSTANDS = "What the user understands about it"
 NOT_ESTABLISHED = "What has not been established"
+CAPABILITIES = "Established capabilities"
+CAPABILITY_KINDS = ("world", "justification", "modification")
+CAPABILITY_SCOPES = ("project", "domain", "general")
+CAPABILITY_RE = re.compile(
+    r"^- \[(world|justification|modification)\] (.+?) "
+    r"\(evidence: (\d{4}-\d{2}-\d{2})\)"
+    r"(?: \[scope: (project|domain|general)\])?"
+    r"(?: \[when: ([^\]]+)\])?$"
+)
+CAPABILITY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+CAPABILITY_EXTENDED_RE = re.compile(
+    CAPABILITY_RE.pattern[:-1]
+    + r"(?: \[valid-until: (\d{4}-\d{2}-\d{2})\])?"
+      r"(?: \[id: ([a-z0-9][a-z0-9-]*)\])?"
+      r"(?: \[requires: ([^\]]+)\])?"
+      r"(?: \[supersedes: ([^\]]+)\])?"
+      r"(?: \[contradicts: ([^\]]+)\])?"
+      r"(?: \[source-evidence: ([1-9][0-9]*)\])?"
+      r"(?: \[retracted: (\d{4}-\d{2}-\d{2})\])?"
+      r"(?: \[retraction-reason: ([^\]]+)\])?$"
+)
+CAPABILITY_REF_RE = re.compile(r"^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$")
 
 # Observations after which an empty distillation is worth prompting for, and after which
 # an existing one is worth injecting. One threshold for writing and reading, so the two
@@ -79,6 +101,10 @@ def atomic_write_text(path, text):
 GAP_LIMIT = 6
 GAP_CHARS = 180
 GAP_BUDGET = 420
+CAPABILITY_LIMIT = 4
+CAPABILITY_CHARS = 140
+CAPABILITY_BUDGET = 250
+CANDIDATE_LIMIT = 2
 
 
 # Stable command names under ~/.laconic/bin, mapped to the scripts they run.
@@ -88,6 +114,7 @@ SHIMS = {
     "laconic-lint": "laconic_lint.py",
     "laconic-console": "laconic_console.py",
     "laconic-status": "laconic_status.py",
+    "laconic-candidates": "laconic_candidates.py",
 }
 
 
@@ -150,6 +177,39 @@ def get_section(body, heading):
     return (rest[: nxt.start()] if nxt else rest).strip()
 
 
+def parse_capabilities(body):
+    """Read auditable capability claims from their backward-compatible body section."""
+    out = []
+    for line in get_section(body, CAPABILITIES).splitlines():
+        match = CAPABILITY_EXTENDED_RE.fullmatch(line.strip())
+        if match:
+            claim = match.group(2)
+            capability_id = match.group(7) or capability_id_from_claim(claim)
+            out.append({
+                "kind": match.group(1), "claim": claim, "date": match.group(3),
+                "scope": match.group(4) or "project", "condition": match.group(5) or "",
+                "valid_until": match.group(6) or "",
+                "capability_id": capability_id,
+                "requires": parse_capability_refs(match.group(8)),
+                "supersedes": parse_capability_refs(match.group(9)),
+                "contradicts": parse_capability_refs(match.group(10)),
+                "source_evidence": int(match.group(11)) if match.group(11) else None,
+                "retracted": match.group(12) or "",
+                "retraction_reason": match.group(13) or "",
+            })
+    return out
+
+
+def capability_id_from_claim(claim):
+    """Stable readable id for legacy claims and new claims without an explicit id."""
+    value = re.sub(r"[^a-z0-9]+", "-", claim.lower()).strip("-")[:48].rstrip("-")
+    return value or "capability"
+
+
+def parse_capability_refs(value):
+    return [item.strip() for item in (value or "").split(",") if item.strip()]
+
+
 def parse_frontmatter(path):
     """Minimal YAML-subset frontmatter reader.
 
@@ -169,6 +229,7 @@ def parse_frontmatter(path):
 
     meta = {}
     evidence_count = 0
+    strong_evidence = []
     for line in text[3:end].splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -177,6 +238,16 @@ def parse_frontmatter(path):
             # The only list-item lines in this schema are evidence entries
             # (depends-on and projects use the inline [a, b] form).
             evidence_count += 1
+            evidence = line[2:].strip()
+            match = re.match(
+                r"^(\d{4}-\d{2}-\d{2}): \[(world|justification|modification)\] (.+)$",
+                evidence,
+            )
+            if match:
+                strong_evidence.append({
+                    "index": evidence_count, "date": match.group(1),
+                    "kind": match.group(2), "text": match.group(3),
+                })
             continue
         if ":" not in line:
             continue
@@ -188,9 +259,12 @@ def parse_frontmatter(path):
         elif value:
             meta[key.strip()] = value
     meta["_evidence-count"] = evidence_count
+    meta["_strong-evidence"] = strong_evidence
     # Read the gap section here rather than in a second pass: the file is already loaded,
     # and this runs on every concept at every session start.
-    meta["_gap"] = " ".join(get_section(text[end + 4 :], NOT_ESTABLISHED).split())
+    body = text[end + 4 :]
+    meta["_gap"] = " ".join(get_section(body, NOT_ESTABLISHED).split())
+    meta["_capabilities"] = parse_capabilities(body)
     return meta
 
 
@@ -216,6 +290,8 @@ def load_concepts():
                 "last-updated": meta.get("last-updated"),
                 "observations": meta.get("_evidence-count", 0),
                 "gap": meta.get("_gap", ""),
+                "capabilities": meta.get("_capabilities", []),
+                "strong_evidence": meta.get("_strong-evidence", []),
             }
         )
     return concepts
@@ -339,6 +415,111 @@ def render_gaps(gaps):
     return "\n".join(lines)
 
 
+def select_capabilities(concepts, cwd, today=None):
+    """Flatten and rank established abilities, preferring this project and stronger proof."""
+    strength = {"modification": 0, "justification": 1, "world": 2}
+    relevant_domains = {c["domain"] for c in concepts if is_relevant(c, cwd)}
+    out = []
+    for concept in concepts:
+        for capability in concept.get("capabilities", ()):
+            if capability.get("retracted"):
+                continue
+            valid_until = capability.get("valid_until")
+            if today is not None and valid_until:
+                try:
+                    if today > date.fromisoformat(valid_until):
+                        continue
+                except ValueError:
+                    continue
+            scope = capability.get("scope", "project")
+            capability_id = capability.get("capability_id") or capability_id_from_claim(
+                capability["claim"]
+            )
+            relevant = is_relevant(concept, cwd)
+            if scope == "project" and not relevant:
+                continue
+            if scope == "domain" and concept["domain"] not in relevant_domains:
+                continue
+            out.append({**capability, "scope": scope, "capability_id": capability_id,
+                        "id": concept["id"], "ref": f"{concept['id']}/{capability_id}",
+                        "relevant": relevant})
+    # Prerequisites are applicability gates. Resolve to a fixed point because a missing
+    # prerequisite can itself invalidate another capability transitively.
+    while True:
+        active = {capability["ref"] for capability in out}
+        kept = [capability for capability in out
+                if all(required in active for required in capability.get("requires", ()))]
+        if len(kept) == len(out):
+            break
+        out = kept
+    superseded = {target for capability in out for target in capability.get("supersedes", ())}
+    out = [capability for capability in out if capability["ref"] not in superseded]
+    out.sort(key=lambda c: (not c["relevant"], strength[c["kind"]], c["id"], c["claim"]))
+    return out
+
+
+def render_capabilities(capabilities):
+    if not capabilities:
+        return ""
+    lines = ["", "", "## Established capabilities", "",
+             "Rely on these demonstrated abilities; do not re-teach their stated content.", ""]
+    spent, shown = 0, 0
+    for capability in capabilities:
+        claim = truncate(capability["claim"], CAPABILITY_CHARS)
+        label = f"{capability['kind']}, {capability['scope']}"
+        condition = f"; when {capability['condition']}" if capability.get("condition") else ""
+        relations = []
+        for relation in ("requires", "supersedes", "contradicts"):
+            if capability.get(relation):
+                relations.append(f"{relation} {', '.join(capability[relation])}")
+        relation_suffix = f"; {'; '.join(relations)}" if relations else ""
+        entry = f"- {capability['id']}/{capability['capability_id']} [{label}]: " \
+                f"{claim}{condition}{relation_suffix}"
+        if shown >= CAPABILITY_LIMIT or spent + len(entry) > CAPABILITY_BUDGET:
+            continue
+        lines.append(entry)
+        spent += len(entry)
+        shown += 1
+    dropped = len(capabilities) - shown
+    if dropped:
+        noun = "capability" if dropped == 1 else "capabilities"
+        lines.append(f"- (+{dropped} more {noun} over budget — see ~/.laconic/concepts/)")
+    return "\n".join(lines)
+
+
+def select_capability_candidates(concepts, cwd):
+    """Strong observations not yet distilled, limited to the active project."""
+    candidates = []
+    for concept in concepts:
+        if not is_relevant(concept, cwd):
+            continue
+        exact = {item["source_evidence"] for item in concept.get("capabilities", ())
+                 if item.get("source_evidence") is not None}
+        legacy = {(item["date"], item["kind"])
+                  for item in concept.get("capabilities", ())
+                  if item.get("source_evidence") is None}
+        for evidence in concept.get("strong_evidence", ()):
+            if (evidence["index"] not in exact
+                    and (evidence["date"], evidence["kind"]) not in legacy):
+                candidates.append({**evidence, "id": concept["id"]})
+    return sorted(candidates, key=lambda item: (item["id"], item["index"]))
+
+
+def render_capability_candidates(candidates):
+    if not candidates:
+        return ""
+    shown = candidates[:CANDIDATE_LIMIT]
+    lines = ["", "", "## Capability candidates", "",
+             "Review strong evidence; distil only a reusable demonstrated ability.", ""]
+    lines.extend(
+        f"- {item['id']} evidence #{item['index']} [{item['kind']}]"
+        for item in shown
+    )
+    if len(candidates) > len(shown):
+        lines.append(f"- (+{len(candidates) - len(shown)} more — run laconic-candidates)")
+    return "\n".join(lines)
+
+
 def render(concepts, cwd=None, today=None):
     if not concepts:
         return (
@@ -388,7 +569,10 @@ def render(concepts, cwd=None, today=None):
             )
         else:
             lines.append(f"- {state}: {summarize(entries)}")
-    return "\n".join(lines) + render_gaps(select_gaps(surviving, cwd))
+    return ("\n".join(lines)
+            + render_capabilities(select_capabilities(surviving, cwd, today))
+            + render_gaps(select_gaps(surviving, cwd))
+            + render_capability_candidates(select_capability_candidates(surviving, cwd)))
 
 
 def summarize(entries):

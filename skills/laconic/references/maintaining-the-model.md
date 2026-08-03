@@ -46,6 +46,9 @@ last-updated: 2026-07-20
 
 One sentence on what the concept is.
 
+## Established capabilities
+- [justification] Can explain why finality waits for this threshold (evidence: 2026-07-20) [scope: project]
+
 ## What the user understands about it
 ## What has not been established
 ```
@@ -85,6 +88,59 @@ The tool enforces this: one observation moves one step, and `verified` needs a s
 independent observation unless you pass `--confirmed`.
 
 ## The two prose sections
+
+The body also carries **established capabilities**. Record one in the same call as the strong
+observation that establishes it:
+
+```bash
+~/.laconic/bin/laconic-record tezos-finality --state familiar --domain consensus \
+  --kind justification --evidence "derived the threshold from the failure model" \
+  --capability "Can justify the finality threshold from the failure model"
+```
+
+`--capability` accepts only `world`, `justification`, or `modification` evidence and stores the
+evidence date beside the claim. Its scope defaults to `project`. Use `--capability-scope
+domain` or `general` only when the observation demonstrates that transfer, and use
+`--capability-condition "assumption"` when the ability depends on a boundary that may not
+hold. State the reusable ability, not praise or a topic label. The injected model filters by
+scope, ranks project-relevant capabilities first, then modification, justification, and world
+evidence. It remains bounded and reports omitted claims. Legacy claims without a scope are
+read as `project`.
+
+To revisit strong observations that were recorded without a claim, run
+`~/.laconic/bin/laconic-candidates`. It shows only candidates relevant to the active project
+and preserves the distinction between evidence and interpretation. Distil a listed item with
+`--capability-from <evidence-number> --capability "narrow demonstrated ability"`; the tool
+reuses the source kind and date without appending evidence or moving state.
+
+Give a capability a stable `--capability-id` when another capability refers to it. Relations
+use qualified `concept/capability-id` references:
+
+- `--capability-requires` gates the claim; if its prerequisite is not applicable, neither is
+  the dependent capability.
+- `--capability-supersedes` removes the replaced claim when the newer one is applicable.
+- `--capability-contradicts` keeps both visible and marks their incompatibility.
+
+The recorder refuses absent targets, self-relations, and prerequisite cycles before writing.
+Do not infer relations from similar names; each is itself a claim about the user's knowledge.
+
+## Capability lifecycle
+
+Use `--capability-valid-until YYYY-MM-DD` in the evidence call when the demonstrated ability
+depends on a temporary API, protocol version, role, or environment. The date is inclusive;
+after it, the capability and every capability requiring it disappear from injection.
+
+Retract an obsolete or disproved claim without erasing it:
+
+```bash
+~/.laconic/bin/laconic-record api-v1 --retract-capability can-deploy \
+  --reason "API v1 was removed"
+```
+
+Retraction keeps the claim, evidence, reason, Git history, and console visibility but removes
+the claim from generation. It is not evidence and does not change the concept state or its
+staleness clock. A later strong observation using the same capability id replaces the
+retracted entry and reactivates it.
 
 `evidence:` records what was observed, one dated line per observation. The two sections
 record what it *adds up to* — a standing distillation, not a second log. Write them with

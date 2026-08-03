@@ -11,6 +11,7 @@ from laconic_console import (
     edit_metadata,
     request_is_json,
     request_is_same_origin,
+    read_concept,
 )
 
 
@@ -65,6 +66,16 @@ class TestRequestBoundary(ConsoleTestCase):
 
 
 class TestMutationIntegrity(ConsoleTestCase):
+    def test_read_exposes_established_capabilities(self):
+        self.create(
+            "thing", "--kind", "world", "--capability", "Can map it to the domain",
+            evidence="mapped the mechanism to the domain",
+        )
+        concept = read_concept(self.path("thing"))
+        self.assertEqual(concept["capabilities"][0]["kind"], "world")
+        self.assertEqual(concept["capabilities"][0]["claim"], "Can map it to the domain")
+        self.assertEqual(concept["capabilities"][0]["scope"], "project")
+
     def test_valid_metadata_edit_still_works(self):
         self.create("thing")
         ok, message = edit_metadata(

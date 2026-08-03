@@ -76,6 +76,24 @@ that launches Claude Code. Remove the remote or unset the flag to keep subsequen
 local. Evidence must never contain credentials, secrets, or verbatim confidential material
 in either mode.
 
+## Format compatibility
+
+The current format is the `0.x` format: frontmatter plus optional markdown sections, with no
+numeric schema field. Readers deliberately ignore unknown frontmatter keys and prose sections,
+so additive changes remain backward compatible. They treat a missing or invalid knowledge
+state conservatively as `unknown`.
+
+Within the `0.x` line, releases must continue to read concept files written by earlier `0.x`
+releases. A change that removes, renames, or reinterprets stored data requires all three of:
+
+1. a migration command that preserves the original Git history;
+2. a release note identifying the first incompatible version; and
+3. a format-version field so readers can refuse data they cannot interpret safely.
+
+Until those exist, destructive format changes are prohibited. If an upgrade produces an
+unexpected lint error, stop writing, preserve `~/.laconic/.git`, and report the incompatibility
+rather than editing concept files by hand.
+
 ## Checking the model
 
 ```bash

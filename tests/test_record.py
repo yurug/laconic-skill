@@ -411,7 +411,11 @@ class TestAuditability(ModelTestCase):
         self.record("thing", "--forget", "mistake")
         self.assertFalse(self.path("thing").exists())
         subprocess.run(
-            ["git", "revert", "--no-edit", "HEAD"],
+            [
+                "git", "-c", "user.name=laconic",
+                "-c", "user.email=laconic@localhost",
+                "revert", "--no-edit", "HEAD",
+            ],
             cwd=str(self.home), capture_output=True, check=True,
         )
         self.assertTrue(self.path("thing").exists())

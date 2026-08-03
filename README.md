@@ -11,7 +11,9 @@ one piece of state that makes the subtraction possible.
 
 ## Try it
 
-Requires Bash and Python 3; the runtime otherwise uses only the Python standard library.
+Requires Bash and Python 3.9 or newer; the runtime otherwise uses only the Python standard
+library. The plugin has been validated with Claude Code 2.1.220 and relies on plugin
+marketplace, `SessionStart`, `SubagentStart`, and `Stop` hook support.
 If Python disappears after installation, the universal hook degrades to a valid conservative
 context instead of breaking session startup, but model loading and maintenance are unavailable.
 
@@ -45,7 +47,8 @@ depending on whether laconic is a plugin or a bare skill:
 `laconic-status` answers the first question everyone asks: it reports what is installed, what
 the hooks fired, and how big the model has become.
 
-Then just work. The model starts empty and fills itself from what you actually do.
+Then just work. The model starts empty and accumulates evidence as the agent observes your
+work; nothing is promoted without a dated observation you can inspect.
 
 ## What you get
 
@@ -100,6 +103,9 @@ it is also the component
 For the file format, the four knowledge states, the promotion ladder, and the lint rules, see
 [`docs/knowledge-model.md`](docs/knowledge-model.md).
 
+For the local trust boundary, stored-data risks, and vulnerability reporting, see
+[`SECURITY.md`](SECURITY.md).
+
 ## Status
 
 Experimental. I use it every day, it changes often, and the hardest open question is how to
@@ -108,7 +114,8 @@ tell a genuinely calibrated brief from one that merely feels shorter.
 Verify a checkout with `./check.sh` — tests, Python compilation, shell syntax, ShellCheck,
 a consistency check between the decay docs and the constants they describe, and a lint of
 your own model. No third-party dependencies; ShellCheck is used when installed and reported
-as skipped when not.
+as skipped when not. CI runs the portable checks on Python 3.9 through 3.13 and validates the
+manifest JSON; the Claude CLI performs its additional manifest validation when available.
 
 Optional local telemetry can measure how often the knowledge model changes the writing. It
 is disabled by default. Set `LACONIC_TELEMETRY=1` in the environment that launches Claude

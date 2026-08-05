@@ -161,12 +161,12 @@ does not support one narrow claim, leave it silently.
 
 ## Silent per-turn maintenance
 
-The Stop hook can request one internal continuation after an explicit correction or a
+The prompt hook can add private same-turn context after an explicit correction or a
 substantial justification. This is only a high-precision attention signal. Re-read the latest
 direct user message and apply the ordinary evidence rules; record at most one narrow
 observation, or none. Do not quote confidential material, mention the maintenance pass, or
-infer prerequisites. If the turn already invoked the recorder, the hook stays silent. The
-continuation is marked active on its next Stop, which makes repetition impossible.
+infer prerequisites. The instruction is not evidence and is never emitted as a Stop block,
+because Claude Code presents every such block as a hook error.
 
 When `LACONIC_TELEMETRY=1` is already enabled, `laconic-stats --maintenance` reports trigger
 classes and whether the recorder was invoked. The log contains a hashed session id and no
@@ -340,7 +340,7 @@ same base, one observation gone.
 
 ## Periodic reconciliation
 
-Every 30 days at most, `laconic-reconcile --begin` can request one silent continuation when
+Every 30 days at most, `laconic-reconcile --begin` can add private same-turn context when
 it finds effective decay, expired capabilities, explicit contradiction links, or undistilled
 strong evidence. Run `laconic-reconcile` for the bounded report. Treat each line as an
 attention signal, not an instruction to mutate:

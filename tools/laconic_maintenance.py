@@ -113,6 +113,21 @@ def begin(path, session_id):
     return reason
 
 
+def begin_text(text, session_id):
+    """Prompt-hook variant: gate the current user text before the assistant turn."""
+    reason = review_reason(text)
+    if reason and os.environ.get("LACONIC_TELEMETRY") == "1" and session_id:
+        pending = pending_path(session_id)
+        try:
+            pending.parent.mkdir(parents=True, exist_ok=True)
+            pending.write_text(json.dumps({
+                "date": date.today().isoformat(), "signal": reason,
+            }) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+    return reason
+
+
 def resolve(path, session_id):
     """Record whether the agent used the recorder during its one continuation."""
     if os.environ.get("LACONIC_TELEMETRY") != "1":

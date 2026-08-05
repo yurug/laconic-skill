@@ -44,6 +44,16 @@
   .count .sw{width:.6em;height:.6em;border-radius:50%}
   .msg{margin-left:auto;font-family:var(--mono);font-size:.78rem;color:var(--accent-quiet);
     min-height:1.2em;transition:opacity .3s}
+  .navigator{position:sticky;top:0;z-index:5;margin:1rem 0 1.3rem;padding:.75rem;
+    display:flex;flex-wrap:wrap;gap:.55rem;background:color-mix(in srgb,var(--paper) 92%,transparent);
+    backdrop-filter:blur(10px);border:1px solid var(--faint);border-radius:12px;box-shadow:var(--shadow)}
+  .navigator input{flex:2 1 18rem;min-width:12rem}
+  .navigator select{flex:1 1 9rem;min-width:8rem}
+  .navigator input,.navigator select{font:inherit;font-size:.82rem;color:var(--ink);
+    background:var(--card);border:1px solid var(--faint);border-radius:7px;padding:.52em .65em}
+  .views{display:flex;gap:.3rem;flex:1 0 100%;overflow-x:auto;padding-bottom:.1rem}
+  .views button.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .result-summary{font-family:var(--mono);font-size:.72rem;color:var(--muted);margin:.2rem 0 -.8rem}
 
   h2.sec{font-family:var(--mono);font-size:.82rem;letter-spacing:.06em;text-transform:uppercase;
     color:var(--muted);margin:2.2rem 0 .9rem;padding-bottom:.5rem;border-bottom:1px solid var(--faint)}
@@ -55,6 +65,7 @@
     padding:1rem 1.05rem;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:.55rem}
   .chead{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap}
   .cid{font-family:var(--mono);font-weight:600;font-size:.95rem;word-break:break-word}
+  .internal{font-family:var(--mono);font-size:.66rem;color:var(--muted);word-break:break-all}
   .dom{font-family:var(--mono);font-size:.68rem;color:var(--muted);background:var(--card2);
     padding:.12em .5em;border-radius:20px}
   .pill{margin-left:auto;font-family:var(--mono);font-size:.68rem;font-weight:600;text-transform:uppercase;
@@ -98,6 +109,10 @@
   .edit input{flex:1 1 8rem;font-size:.8rem;border:1px solid var(--faint);border-radius:6px;
     padding:.35em .5em;background:var(--card);color:var(--ink)}
   .empty-state{color:var(--muted);font-size:.95rem;padding:2rem 0}
+  .claim-title{font-size:1rem;font-weight:600;line-height:1.35}
+  .claim-meta{font-family:var(--mono);font-size:.69rem;color:var(--muted)}
+  details.tech{font-size:.72rem;color:var(--muted);margin-top:.15rem}
+  details.tech summary{cursor:pointer;color:var(--accent-quiet)}
 </style>
 </head>
 <body>
@@ -105,21 +120,32 @@
   <header>
     <p class="tag">laconic<span class="d">.</span> · model console</p>
     <h1>What laconic thinks you know</h1>
-    <p class="intro">Every card is an <b>inference</b> the model made from your conversations, with the evidence for it. Review it, and <b>correct what's wrong</b> — promote something it underrates, demote something it overrates, fix a domain, or delete a bad guess. This is for correcting specific claims, <b>not for rating yourself</b>: the model learns from what you do, and self-ratings don't predict understanding.</p>
+    <p class="intro">Browse the model as <b>claims</b>, <b>knowledge boundaries</b>, or underlying concept records. Search all evidence, or narrow by domain, claim type, and scope. Each semantic claim links back to the observations supporting it. Review specific propositions rather than rating your own expertise.</p>
   </header>
 
   <div class="bar" id="bar"></div>
+  <nav class="navigator" aria-label="Model navigation">
+    <div class="views" id="views"></div>
+    <input id="search" type="search" placeholder="Search claims, topics, domains, or evidence…" />
+    <select id="domain"><option value="">All domains</option></select>
+    <select id="kind"><option value="">All claim types</option></select>
+    <select id="scope"><option value="">All scopes</option></select>
+    <select id="sort"><option value="domain">Group by domain</option><option value="recent">Most recent</option><option value="alpha">Alphabetical</option></select>
+    <button id="clear-filters" type="button">Clear</button>
+  </nav>
+  <div class="result-summary" id="result-summary"></div>
   <div id="content"></div>
 </div>
 
 <script>
 const STATE_COLORS={unknown:"var(--s-unknown)",exposed:"var(--s-exposed)",familiar:"var(--s-familiar)",verified:"var(--s-verified)"};
 let MODEL={concepts:[],states:["unknown","exposed","familiar","verified"]};
+let NAV={view:"claims",q:"",domain:"",kind:"",scope:"",sort:"domain"};
 
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 async function load(){
-  const r=await fetch("/api/model"); MODEL=await r.json(); render();
+  const r=await fetch("/api/model"); MODEL=await r.json(); renderShell();renderContent();
 }
 function flash(t){const m=document.querySelector(".msg");if(m){m.textContent=t;m.style.opacity=1;setTimeout(()=>m.style.opacity=0,2200);}}
 
@@ -129,11 +155,23 @@ async function post(path,body){
   flash("✓ "+(j.message||"done")); await load(); return true;
 }
 
-function splitEvidence(e){const m=String(e).match(/^(\d{4}-\d{2}-\d{2}):?\s*(.*)$/);return m?[m[1],m[2]]:["",e];}
+function splitEvidence(e){
+  const m=String(e).match(/^(\d{4}-\d{2}-\d{2}):?\s*(.*)$/), date=m?m[1]:"";
+  let text=m?m[2]:String(e), kind="", basis="";
+  let tag=text.match(/^\[(term|world|justification|modification)\]\s*/);
+  if(tag){kind=tag[1];text=text.slice(tag[0].length);}
+  tag=text.match(/^\[basis: ([^\]]+)\]\s*/);
+  if(tag){basis=tag[1];text=text.slice(tag[0].length);}
+  // Transcript hashes are audit plumbing, not explanatory content. Keep them on disk;
+  // remove them from the ordinary reading path.
+  text=text.replace(/^\[sources: [^\]]+\]\s*/,"");
+  return [date,text,kind,basis];
+}
 
 function card(c){
-  const why=c.evidence.map(e=>{const[d,t]=splitEvidence(e);
-    return `<li>${d?`<span class="date">${esc(d)}</span> `:""}${esc(t)}</li>`;}).join("")
+  const why=c.evidence.map(e=>{const[d,t,k,b]=splitEvidence(e);
+    const meta=[k,b].filter(Boolean).join(" · ");
+    return `<li>${d?`<span class="date">${esc(d)}</span> `:""}${meta?`<b>${esc(meta)}</b> · `:""}${esc(t)}</li>`;}).join("")
     || `<li>no evidence recorded</li>`;
   const abilities=(c.capabilities||[]).map(a=>{
     const rel=["requires","supersedes","contradicts"]
@@ -145,18 +183,27 @@ function card(c){
       `${lifecycle?` · ${esc(lifecycle)}`:""} `+
       `<span class="date">${esc(a.date)}</span></li>`;
   }).join("");
+  const knowledge=(c.knowledge||[]).map(k=>
+    `<li><b>${esc(k.kind)} · ${esc(k.scope)}</b> · ${esc(k.claim)}`+
+    `${k.condition?` · when ${esc(k.condition)}`:""} `+
+    `<span class="date">evidence ${k.evidence.map(n=>"#"+n).join(", ")}</span></li>`
+  ).join("");
   const states=MODEL.states.map(s=>`<div class="s${s===c.state?" sel":""}" data-s="${s}">${s}</div>`).join("");
   return `<div class="cardc" data-id="${esc(c.id)}">
     <div class="chead">
-      <span class="cid">${esc(c.id)}</span>
+      <span class="cid">${esc(c.label)}</span>
       <span class="dom">${esc(c.domain)}</span>
       <span class="pill ${c.state}">${c.state}</span>
     </div>
-    <div class="summary${c.summary?"":" empty"}">${esc(c.summary||"no summary yet")}</div>
+    ${c.summary?`<div class="summary">${esc(c.summary)}</div>`:""}
     <div class="conf">confidence ${(c.confidence).toFixed(2)}${c.last_updated?" · "+esc(c.last_updated):""}</div>
+    ${knowledge?`<div class="lbl">What the model claims about you</div><ul class="why">${knowledge}</ul>`:""}
     ${abilities?`<div class="lbl">Established capabilities</div><ul class="why">${abilities}</ul>`:""}
     <div class="lbl">Evidence</div>
     <ul class="why">${why}</ul>
+    <details class="tech"><summary>Technical details</summary>
+      internal id: ${esc(c.id)} · confidence ${(c.confidence).toFixed(2)}
+    </details>
     <div class="actions">
       <button class="link" data-act="correct">Correct…</button>
       <button class="link" data-act="edit">Domain / summary</button>
@@ -176,37 +223,129 @@ function card(c){
   </div>`;
 }
 
-function section(title,items){
+function evidenceItems(c,numbers){
+  return numbers.map(n=>{
+    const raw=c.evidence[n-1]; if(!raw)return "";
+    const[d,t,k,b]=splitEvidence(raw),meta=[k,b].filter(Boolean).join(" · ");
+    return `<li><span class="date">#${n}${d?" · "+esc(d):""}</span> `+
+      `${meta?`<b>${esc(meta)}</b> · `:""}${esc(t)}</li>`;
+  }).join("");
+}
+
+function claimCard(item){
+  const {concept:c,claim:k}=item;
+  return `<article class="cardc">
+    <div class="claim-title">${esc(k.claim)}</div>
+    <div class="claim-meta">${esc(k.kind)} · ${esc(k.scope)}${k.condition?" · when "+esc(k.condition):""}</div>
+    <div class="lbl">Why the model believes this</div>
+    <ul class="why">${evidenceItems(c,k.evidence)}</ul>
+    <details class="tech"><summary>Model location</summary>
+      ${esc(c.label)} · ${esc(c.domain)} · internal id: ${esc(c.id)}
+    </details>
+  </article>`;
+}
+
+function boundaryCard(c){
+  const why=c.evidence.map(e=>{const[d,t,k,b]=splitEvidence(e),meta=[k,b].filter(Boolean).join(" · ");
+    return `<li>${d?`<span class="date">${esc(d)}</span> `:""}${meta?`<b>${esc(meta)}</b> · `:""}${esc(t)}</li>`;
+  }).join("");
+  return `<article class="cardc" data-id="${esc(c.id)}">
+    <div class="claim-title">Not established: ${esc(c.label)}</div>
+    <div class="claim-meta">The model should explain this before relying on it.</div>
+    <div class="lbl">Observed boundary</div><ul class="why">${why}</ul>
+    <details class="tech"><summary>Technical details</summary>
+      ${esc(c.domain)} · ${esc(c.state)} · confidence ${(c.confidence).toFixed(2)} · internal id: ${esc(c.id)}
+    </details>
+  </article>`;
+}
+
+function section(title,items,renderer=card){
   if(!items.length)return "";
   return `<h2 class="sec">${esc(title)} <span style="color:var(--accent-quiet)">${items.length}</span></h2>
-    <div class="grid">${items.map(card).join("")}</div>`;
+    <div class="grid">${items.map(renderer).join("")}</div>`;
 }
 
-function render(){
+function allClaims(){
+  return MODEL.concepts.flatMap(c=>(c.knowledge||[]).map(claim=>({concept:c,claim})));
+}
+function allBoundaries(){
+  return MODEL.concepts.filter(c=>(c.state==="unknown"||c.state==="exposed")&&!(c.knowledge||[]).length);
+}
+function optionList(element,values,label){
+  element.innerHTML=`<option value="">${esc(label)}</option>`+
+    values.map(v=>`<option value="${esc(v)}"${NAV[element.id]===v?" selected":""}>${esc(v)}</option>`).join("");
+}
+function renderShell(){
   const cs=MODEL.concepts;
-  // summary bar
   const counts={};MODEL.states.forEach(s=>counts[s]=0);cs.forEach(c=>counts[c.state]=(counts[c.state]||0)+1);
   document.getElementById("bar").innerHTML=
-    `<span class="count">${cs.length} concepts</span>`+
+    `<span class="count">${allClaims().length} semantic claims</span>`+
+    `<span class="count">${allBoundaries().length} boundaries</span>`+
+    `<span class="count">${cs.length} concept records</span>`+
     MODEL.states.slice().reverse().map(s=>`<span class="count"><span class="sw" style="background:${STATE_COLORS[s]}"></span>${s} ${counts[s]||0}</span>`).join("")+
     `<span class="msg"></span>`;
-
-  if(!cs.length){document.getElementById("content").innerHTML=`<p class="empty-state">The model is empty. It fills as your conversations reveal what you know — nothing to review yet.</p>`;return;}
-
-  // "worth reviewing": least established / least confident first
-  const rank={unknown:0,exposed:1,familiar:2,verified:3};
-  const review=cs.filter(c=>c.state==="unknown"||c.state==="exposed")
-    .sort((a,b)=>a.confidence-b.confidence).slice(0,8);
-  const reviewIds=new Set(review.map(c=>c.id));
-  const rest=cs.filter(c=>!reviewIds.has(c.id));
-  // group rest by domain
-  const byDom={};rest.forEach(c=>(byDom[c.domain]=byDom[c.domain]||[]).push(c));
-  const domHtml=Object.keys(byDom).sort((a,b)=>byDom[b].length-byDom[a].length)
-    .map(d=>section(d,byDom[d].sort((a,b)=>rank[b.state]-rank[a.state]))).join("");
-
-  document.getElementById("content").innerHTML=
-    section("Worth reviewing — least established first",review)+domHtml;
+  const views=[
+    ["claims","Claims",allClaims().length], ["boundaries","Boundaries",allBoundaries().length],
+    ["concepts","Concept records",cs.length], ["all","Combined",allClaims().length+allBoundaries().length]
+  ];
+  document.getElementById("views").innerHTML=views.map(([id,label,n])=>
+    `<button data-view="${id}" class="${NAV.view===id?"active":""}">${label} · ${n}</button>`).join("");
+  optionList(document.getElementById("domain"),[...new Set(cs.map(c=>c.domain))].sort(),"All domains");
+  optionList(document.getElementById("kind"),[...new Set(allClaims().map(x=>x.claim.kind))].sort(),"All claim types");
+  optionList(document.getElementById("scope"),[...new Set(allClaims().map(x=>x.claim.scope))].sort(),"All scopes");
+  document.getElementById("kind").disabled=!(NAV.view==="claims"||NAV.view==="all");
+  document.getElementById("scope").disabled=!(NAV.view==="claims"||NAV.view==="all");
 }
+function searchableConcept(c){return [c.label,c.id,c.domain,c.summary,...c.evidence].join(" ").toLowerCase();}
+function matches(c,extra=""){
+  return (!NAV.domain||c.domain===NAV.domain)&&(!NAV.q||(searchableConcept(c)+" "+extra.toLowerCase()).includes(NAV.q));
+}
+function grouped(items,domainOf,renderer,title){
+  if(NAV.sort!=="domain")return section(title,items,renderer);
+  const groups={};items.forEach(item=>{const d=domainOf(item);(groups[d]=groups[d]||[]).push(item);});
+  return Object.keys(groups).sort((a,b)=>groups[b].length-groups[a].length||a.localeCompare(b))
+    .map(d=>section(d,groups[d],renderer)).join("");
+}
+function renderContent(){
+  const cs=MODEL.concepts;
+  if(!cs.length){document.getElementById("content").innerHTML=`<p class="empty-state">The model is empty.</p>`;return;}
+  const recent=(a,b)=>(b.concept?.last_updated||b.last_updated||"").localeCompare(a.concept?.last_updated||a.last_updated||"");
+  const alpha=(a,b)=>(a.claim?.claim||a.label).localeCompare(b.claim?.claim||b.label);
+  const sorter=NAV.sort==="recent"?recent:alpha;
+  let claims=allClaims().filter(x=>matches(x.concept,x.claim.claim+" "+x.claim.kind+" "+x.claim.scope)
+    &&(!NAV.kind||x.claim.kind===NAV.kind)&&(!NAV.scope||x.claim.scope===NAV.scope)).sort(sorter);
+  let boundaries=allBoundaries().filter(c=>matches(c)).sort(NAV.sort==="recent"?recent:alpha);
+  const semanticIds=new Set(allClaims().map(x=>x.concept.id)), boundaryIds=new Set(allBoundaries().map(c=>c.id));
+  let concepts=cs.filter(c=>!semanticIds.has(c.id)&&!boundaryIds.has(c.id)&&matches(c)).sort(NAV.sort==="recent"?recent:alpha);
+  let html="",shown=0;
+  if(NAV.view==="claims"||NAV.view==="all"){html+=grouped(claims,x=>x.concept.domain,claimCard,"Claims");shown+=claims.length;}
+  if(NAV.view==="boundaries"||NAV.view==="all"){html+=grouped(boundaries,c=>c.domain,boundaryCard,"Knowledge boundaries");shown+=boundaries.length;}
+  if(NAV.view==="concepts"){html+=grouped(concepts,c=>c.domain,card,"Legacy concept records");shown+=concepts.length;}
+  document.getElementById("result-summary").textContent=`${shown} result${shown===1?"":"s"}${NAV.q?` for “${NAV.q}”`:""}`;
+  document.getElementById("content").innerHTML=html||`<p class="empty-state">No model entries match these filters.</p>`;
+}
+
+document.getElementById("views").addEventListener("click",e=>{
+  const button=e.target.closest("button[data-view]");if(!button)return;
+  NAV.view=button.dataset.view;renderShell();renderContent();
+});
+document.getElementById("search").addEventListener("input",e=>{
+  NAV.q=e.target.value.trim().toLowerCase();renderContent();
+});
+for(const id of ["domain","kind","scope","sort"]){
+  document.getElementById(id).addEventListener("change",e=>{NAV[id]=e.target.value;renderContent();});
+}
+document.getElementById("clear-filters").addEventListener("click",()=>{
+  NAV={...NAV,q:"",domain:"",kind:"",scope:""};
+  document.getElementById("search").value="";renderShell();renderContent();
+});
+document.addEventListener("keydown",e=>{
+  if(e.key==="/"&&!/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)){
+    e.preventDefault();document.getElementById("search").focus();
+  }else if(e.key==="Escape"&&document.activeElement===document.getElementById("search")){
+    NAV.q="";document.getElementById("search").value="";renderContent();
+  }
+});
 
 document.addEventListener("click",async e=>{
   const b=e.target.closest("button");if(!b)return;

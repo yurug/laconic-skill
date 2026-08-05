@@ -67,7 +67,9 @@ matters. For each concept the text depends on:
 
 Treat an injected **established capability** as narrower and stronger than the concept state:
 rely on exactly the demonstrated ability without extrapolating to the whole domain. Treat an
-established gap as an exception in the other direction and explain that facet.
+injected **established knowledge** claim as a sourced proposition, not whole-topic mastery;
+honour its scope and condition exactly. Treat an established gap as an exception in the other
+direction and explain that facet.
 
 **When uncertain, explain more.** Under-explaining a novice costs d = 0.505; over-explaining
 an expert costs d = −0.428. The first is worse, so uncertainty resolves toward explaining —
@@ -138,6 +140,10 @@ Three rules matter often enough to state here:
   ability is not independent; never infer a relation from topic similarity. Bound temporary
   knowledge with `--capability-valid-until`. Retract a disproved or obsolete claim with
   `--retract-capability <id> --reason "why"`; do not delete its audit trail.
+- **Distil semantic knowledge only from exact evidence.** When observations establish a
+  durable understanding, principle, constraint, or preference, use `--claim`, `--claim-kind`,
+  and `--claim-from <evidence-numbers>`. Keep the conservative project scope unless the cited
+  evidence establishes broader transfer. Never source a claim from inferred evidence.
 - **Maintain the model without assigning chores to the user.** Review capability candidates
   already present in the injected context, or run `~/.laconic/bin/laconic-candidates`
   yourself when deeper inspection is useful. Distil an existing candidate with
@@ -145,6 +151,18 @@ Three rules matter often enough to state here:
   does not duplicate evidence or move the concept state. If no narrow claim is directly
   supported, leave it silently. Never ask the user to curate concepts, indexes, candidates,
   or routine maintenance; those are implementation details.
+- **Treat the silent maintenance continuation as a gate, not evidence.** When the Stop hook
+  requests a pass after an explicit correction or justification, inspect only the latest
+  direct user message. Record at most one narrow paraphrased observation when it directly
+  demonstrates stable knowledge; otherwise finish unchanged. Never mention the pass. The
+  trigger classification does not justify a state, domain, capability, or inference by itself.
+- **Reconcile lifecycle signals conservatively.** On a periodic reconciliation continuation,
+  run `~/.laconic/bin/laconic-reconcile`. Decay and expiry already protect retrieval; do not
+  rewrite stored history merely to match them. Resolve only directly evidenced obsolescence,
+  distillation, or retraction. For every undistilled `justification` or `modification`, either
+  distil its narrow reusable ability or deliberately classify it as only a preference or
+  constraint; do not silently skip the decision. Leave ambiguous explicit contradictions
+  unchanged. Never mention the pass or turn it into a user task.
 - **Never put secrets or verbatim confidential material in evidence.** It is committed
   locally and is pushed only if the user configured an `origin` remote and enabled
   `LACONIC_PUSH=1`. Describe the observation, not the content.

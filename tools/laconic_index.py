@@ -41,6 +41,15 @@ EXPOSED_DROP_DAYS = 90
 UNDERSTANDS = "What the user understands about it"
 NOT_ESTABLISHED = "What has not been established"
 CAPABILITIES = "Established capabilities"
+ESTABLISHED_KNOWLEDGE = "Established knowledge"
+KNOWLEDGE_KINDS = ("understanding", "principle", "constraint", "preference")
+KNOWLEDGE_SCOPES = ("project", "domain", "general")
+KNOWLEDGE_RE = re.compile(
+    r"^- \[(understanding|principle|constraint|preference)\] (.+?) "
+    r"\(evidence: ([1-9][0-9]*(?:, [1-9][0-9]*)*)\)"
+    r"(?: \[scope: (project|domain|general)\])?"
+    r"(?: \[when: ([^\]]+)\])?$"
+)
 CAPABILITY_KINDS = ("world", "justification", "modification")
 CAPABILITY_SCOPES = ("project", "domain", "general")
 CAPABILITY_RE = re.compile(
@@ -109,6 +118,12 @@ GAP_BUDGET = 420
 CAPABILITY_LIMIT = 4
 CAPABILITY_CHARS = 140
 CAPABILITY_BUDGET = 250
+KNOWLEDGE_LIMIT = 4
+KNOWLEDGE_CHARS = 160
+# Four full claims fit beside the bounded state/capability/gap blocks and materially expose
+# the semantic model. A 360-char budget routinely admitted only two normal claims, making
+# the v2 migration richer on disk but nearly invisible at use time.
+KNOWLEDGE_BUDGET = 760
 CANDIDATE_LIMIT = 2
 ROUTER_DOMAIN_LIMIT = 40
 ROUTER_STRONG_LIMIT = 12
@@ -128,11 +143,16 @@ SHIMS = {
     "laconic-lint": "laconic_lint.py",
     "laconic-console": "laconic_console.py",
     "laconic-status": "laconic_status.py",
+    "laconic-stats": "laconic_stats.py",
     "laconic-candidates": "laconic_candidates.py",
     "laconic-bootstrap": "laconic_bootstrap.py",
     "laconic-review": "laconic_review.py",
     "laconic-review-web": "laconic_review_web.py",
     "laconic-apply-review": "laconic_apply_review.py",
+    "laconic-maintenance": "laconic_maintenance.py",
+    "laconic-route-observe": "laconic_route_observe.py",
+    "laconic-reconcile": "laconic_reconcile.py",
+    "laconic-migrate-v2": "laconic_migrate_v2.py",
 }
 
 
@@ -218,6 +238,22 @@ def parse_capabilities(body):
     return out
 
 
+def parse_knowledge_claims(body):
+    """Read sourced semantic claims; files without this v2 section remain valid."""
+    out = []
+    for line in get_section(body, ESTABLISHED_KNOWLEDGE).splitlines():
+        match = KNOWLEDGE_RE.fullmatch(line.strip())
+        if match:
+            out.append({
+                "kind": match.group(1),
+                "claim": match.group(2),
+                "evidence": [int(value) for value in match.group(3).split(", ")],
+                "scope": match.group(4) or "project",
+                "condition": match.group(5) or "",
+            })
+    return out
+
+
 def capability_id_from_claim(claim):
     """Stable readable id for legacy claims and new claims without an explicit id."""
     value = re.sub(r"[^a-z0-9]+", "-", claim.lower()).strip("-")[:48].rstrip("-")
@@ -288,6 +324,7 @@ def parse_frontmatter(path):
     body = text[end + 4 :]
     meta["_gap"] = " ".join(get_section(body, NOT_ESTABLISHED).split())
     meta["_capabilities"] = parse_capabilities(body)
+    meta["_knowledge"] = parse_knowledge_claims(body)
     return meta
 
 
@@ -314,6 +351,7 @@ def load_concepts():
                 "observations": meta.get("_evidence-count", 0),
                 "gap": meta.get("_gap", ""),
                 "capabilities": meta.get("_capabilities", []),
+                "knowledge": meta.get("_knowledge", []),
                 "strong_evidence": meta.get("_strong-evidence", []),
             }
         )
@@ -510,6 +548,52 @@ def render_capabilities(capabilities):
     return "\n".join(lines)
 
 
+def select_knowledge(concepts, cwd):
+    """Select applicable semantic claims without making model size an injection cost."""
+    # Domain leaves call render without a filesystem project. Their input is already
+    # restricted to one domain, so every input domain is relevant. This also makes the
+    # no-active-project fallback useful while the hard render budget still bounds cost.
+    relevant_domains = ({c["domain"] for c in concepts} if cwd is None else
+                        {c["domain"] for c in concepts if is_relevant(c, cwd)})
+    kind_rank = {"constraint": 0, "preference": 1, "principle": 2, "understanding": 3}
+    out = []
+    for concept in concepts:
+        relevant = is_relevant(concept, cwd)
+        for claim in concept.get("knowledge", ()):
+            scope = claim.get("scope", "project")
+            if scope == "project" and not relevant:
+                continue
+            if scope == "domain" and concept["domain"] not in relevant_domains:
+                continue
+            out.append({**claim, "id": concept["id"], "relevant": relevant})
+    out.sort(key=lambda item: (
+        not item["relevant"], kind_rank.get(item["kind"], 9), item["id"], item["claim"]
+    ))
+    return out
+
+
+def render_knowledge(claims):
+    if not claims:
+        return ""
+    lines = ["", "", "## Established knowledge", "",
+             "Use these sourced claims to calibrate explanations and decisions.", ""]
+    spent, shown = 0, 0
+    for claim in claims:
+        text = truncate(claim["claim"], KNOWLEDGE_CHARS)
+        condition = f"; when {claim['condition']}" if claim.get("condition") else ""
+        entry = f"- {claim['id']} [{claim['kind']}, {claim['scope']}]: {text}{condition}"
+        if shown >= KNOWLEDGE_LIMIT or spent + len(entry) > KNOWLEDGE_BUDGET:
+            continue
+        lines.append(entry)
+        spent += len(entry)
+        shown += 1
+    dropped = len(claims) - shown
+    if dropped:
+        noun = "claim" if dropped == 1 else "claims"
+        lines.append(f"- (+{dropped} more knowledge {noun} over budget — see ~/.laconic/concepts/)")
+    return "\n".join(lines)
+
+
 def select_capability_candidates(concepts, cwd):
     """Strong observations not yet distilled, limited to the active project."""
     candidates = []
@@ -597,6 +681,7 @@ def render(concepts, cwd=None, today=None):
             lines.append(f"- {state}: {summarize(entries)}")
     return ("\n".join(lines)
             + render_capabilities(select_capabilities(surviving, cwd, today))
+            + render_knowledge(select_knowledge(surviving, cwd))
             + render_gaps(select_gaps(surviving, cwd))
             + render_capability_candidates(select_capability_candidates(surviving, cwd)))
 

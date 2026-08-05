@@ -26,6 +26,9 @@ BOOTSTRAP = TOOLS / "laconic_bootstrap.py"
 REVIEW = TOOLS / "laconic_review.py"
 REVIEW_WEB = TOOLS / "laconic_review_web.py"
 APPLY_REVIEW = TOOLS / "laconic_apply_review.py"
+MAINTENANCE = TOOLS / "laconic_maintenance.py"
+ROUTE_OBSERVE = TOOLS / "laconic_route_observe.py"
+MIGRATE_V2 = TOOLS / "laconic_migrate_v2.py"
 
 sys.path.insert(0, str(TOOLS))
 

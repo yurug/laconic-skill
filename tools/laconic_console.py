@@ -34,6 +34,7 @@ from laconic_index import (  # noqa: E402
     atomic_write_text,
     parse_frontmatter,
     parse_capabilities,
+    parse_knowledge_claims,
     write_index_file,
 )
 from laconic_lint import SECRET_PATTERNS  # noqa: E402
@@ -48,6 +49,11 @@ from laconic_record import (  # noqa: E402
 UI_FILE = HERE / "console_ui.html"
 DOMAIN_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 MAX_BODY = 64 * 1024
+ACRONYMS = {
+    "ap", "api", "bb", "ci", "cli", "dsar", "etf", "gdpr", "gui", "ir", "kb",
+    "llm", "nav", "ocaml", "pbc", "pcm", "posix", "pty", "rcf", "rocq", "ssa",
+    "toctou", "ui", "vp", "wtp", "x11",
+}
 HTML_CSP = (
     "default-src 'self'; connect-src 'self'; img-src 'self'; "
     "style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
@@ -83,6 +89,25 @@ def home():
 
 def concepts_dir():
     return home() / "concepts"
+
+
+def human_label(concept_id):
+    """Turn a storage key into a readable fallback, preserving common technical names."""
+    words = concept_id.split("-")
+    rendered = [word.upper() if word in ACRONYMS else word.capitalize() for word in words]
+    # `pbc-prepared-by-client` carries both acronym and expansion. Present that relation
+    # instead of a repetitive title, but keep ordinary names such as `rust-pin` intact.
+    if words and words[0] in ACRONYMS and len(words) > 1:
+        initials = "".join(word[0] for word in words[1:])
+        if initials == words[0]:
+            return f"{words[0].upper()} — {' '.join(w.capitalize() for w in words[1:])}"
+    return " ".join(rendered)
+
+
+def useful_summary(summary, concept_id):
+    """Reject recorder fallbacks that merely spell the internal id with spaces."""
+    normalized = lambda value: re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+    return summary if normalized(summary) != normalized(concept_id.replace("-", " ")) else ""
 
 
 def read_concept(path):
@@ -128,13 +153,16 @@ def read_concept(path):
     deps = meta.get("depends-on", [])
     if isinstance(deps, str):
         deps = [d.strip() for d in deps.strip("[]").split(",") if d.strip()]
+    summary = useful_summary(summary, meta.get("id", path.stem))
     return {
         "id": meta.get("id", path.stem),
+        "label": human_label(meta.get("id", path.stem)),
         "domain": meta.get("domain", "general"),
         "state": meta.get("state", "unknown"),
         "confidence": conf,
         "evidence": evidence,
         "capabilities": parse_capabilities(body),
+        "knowledge": parse_knowledge_claims(body),
         "summary": summary,
         "depends_on": deps,
         "last_updated": meta.get("last-updated", ""),

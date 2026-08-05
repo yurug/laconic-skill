@@ -819,6 +819,48 @@ class TestEvidenceKinds(ModelTestCase):
         self.assertIn("unclassified", r.text)
 
 
+class TestEstablishedKnowledge(ModelTestCase):
+    def test_distils_claim_from_multiple_existing_observations(self):
+        self.create("thing", evidence="explained the bounded cache")
+        self.record("thing", "--state", "familiar", "--evidence", "applied the same bound")
+        r = self.record(
+            "thing", "--claim", "Understands why the cache must remain bounded",
+            "--claim-kind", "principle", "--claim-from", "1,2",
+            "--claim-scope", "domain",
+        )
+        self.assertEqual(r.code, 0, r.text)
+        self.assertIn(
+            "- [principle] Understands why the cache must remain bounded "
+            "(evidence: 1, 2) [scope: domain]",
+            self.section("thing", "Established knowledge"),
+        )
+        self.assertEqual(self.lint().code, 0, self.lint().text)
+
+    def test_claim_rejects_out_of_range_and_inferred_sources(self):
+        self.create("thing")
+        out = self.record("thing", "--claim", "Knows it", "--claim-from", "2")
+        self.assertEqual(out.code, 2, out.text)
+        self.assertIn("beyond", out.text)
+        self.record("thing", "--state", "unknown", "--basis", "inference",
+                    "--evidence", "probably prefers it")
+        inferred = self.record("thing", "--claim", "Prefers it", "--claim-kind",
+                               "preference", "--claim-from", "2")
+        self.assertEqual(inferred.code, 2, inferred.text)
+        self.assertIn("inferred evidence", inferred.text)
+
+    def test_lint_rejects_malformed_or_unsourced_claims(self):
+        self.create("thing")
+        text = self.read("thing").replace(
+            "## Established knowledge\n\n",
+            "## Established knowledge\n"
+            "- [understanding] Knows it (evidence: 9) [scope: general]\n\n",
+        )
+        self.path("thing").write_text(text, encoding="utf-8")
+        result = self.lint()
+        self.assertEqual(result.code, 1, result.text)
+        self.assertIn("knowledge source evidence #9 exceeds", result.text)
+
+
 class TestCapabilities(ModelTestCase):
     def test_inference_cannot_establish_a_capability(self):
         r = self.record(

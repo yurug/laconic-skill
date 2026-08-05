@@ -23,6 +23,9 @@ Tezos finality.
 
 ## Established capabilities
 - [justification] Can justify the finality threshold from the failure model (evidence: 2026-07-20) [scope: project]
+
+## Established knowledge
+- [principle] Treats the threshold as a consequence of the failure model (evidence: 1) [scope: domain]
 ```
 
 `~/.laconic/INDEX.md` is regenerated from the concept files and is what gets injected into a
@@ -74,6 +77,57 @@ toward `verified`, become a capability, or appear as a capability candidate. Use
 `--basis confirmation` or `--basis inference`; direct evidence carries no extra marker.
 Inference may omit `--state`, preserving the current value or using `unknown` on creation.
 
+### Silent ongoing maintenance
+
+The `Stop` hook mechanically recognizes only explicit corrections and substantial
+justifications in the latest direct user message. It never turns those words into model data.
+Instead it grants the main agent one silent continuation to decide whether the message
+directly demonstrates stable knowledge. The agent records one narrow paraphrase or leaves the
+model unchanged. A recorder invocation in the same turn suppresses the pass, and
+`stop_hook_active` prevents recursive maintenance. The hook reason contains only the signal
+class, never transcript text.
+
+This is intentionally narrower than transcript bootstrap. It improves capture recall without
+making a regex an epistemic authority; deeper historical inference remains consent-gated.
+With existing `LACONIC_TELEMETRY=1` consent, the hook also records the signal class and whether
+the continuation invoked the recorder in `~/.laconic/maintenance-telemetry.jsonl`. It hashes
+the session id and stores no transcript content. `laconic-stats --maintenance` reports this
+yield. An unchanged pass may be a correct abstention or a missed record, so the result is not
+precision or recall without an independently reviewed sample.
+
+The prompt router uses the same telemetry consent to append selected domain names and injected
+character counts to `~/.laconic/routing-telemetry.jsonl`. `laconic-stats --routing` reports
+selection frequency, cost, and hot domains. It stores neither prompt text nor tokenized prompt
+features. These numbers expose over-routing and context pressure, but usefulness still needs
+an independent review sample. At Stop, a content-free resolver additionally records which
+selected domains have concept/domain vocabulary in the final answer, then deletes its pending
+row. This answer-mention rate is only a proxy: useful knowledge can remain implicit and a
+lexical match can be incidental.
+The resolver also scans all modeled domains and records `missed_domains` only with two
+independent lexical signals: a complete multi-token domain name, two terms from one concept,
+or a single-token domain plus a distinct term from one of its concepts. Repeated misses identify candidates
+for routing aliases; one occurrence is not evidence that injection would have improved the
+answer.
+
+### Periodic reconciliation
+
+At most once every 30 days, the Stop hook runs `laconic-reconcile --begin`. A silent agent
+continuation occurs only when the mechanical report contains an effective state decay, an
+expired capability, a pair linked by an explicit `contradicts` relation, or undistilled strong
+evidence. The agent inspects `laconic-reconcile`, applies ordinary evidence rules, and may
+leave every item unchanged. The continuation then writes `.reconciled-at`; this prevents
+repeated prompts while preserving conservative decisions.
+
+Three undistilled strong observations or any explicit contradiction may bring the pass forward.
+The tool hashes the complete mechanical findings into `.reconciled-signature`; an unchanged
+backlog that was deliberately left alone cannot trigger again. New evidence changes the
+signature and makes the expanded backlog eligible for one new pass.
+
+Decay and expiry already remove unsafe claims from retrieval. Therefore reconciliation must
+not rewrite a stored state merely to mirror effective decay or retract a historically valid
+capability merely because its validity window ended. Stored changes require evidence that the
+underlying claim itself became obsolete, false, or safely distillable.
+
 A strong observation can establish a reusable capability in the same write:
 
 ```bash
@@ -113,6 +167,45 @@ Temporary capabilities can carry `valid-until`; the date is inclusive. Obsolete 
 capabilities are marked with `--retract-capability <id> --reason "why"`, retained for audit,
 and excluded from injection. In both cases, capabilities that require the inactive claim are
 also excluded. A later matching strong observation can reactivate the same id.
+
+### Established semantic knowledge (schema v2)
+
+Concept states answer only how cautiously to introduce a topic. Capabilities answer what the
+user demonstrated they can do. The `Established knowledge` section records the missing
+semantic layer: a concrete `understanding`, `principle`, `constraint`, or `preference`.
+
+```bash
+~/.laconic/bin/laconic-record tezos-finality \
+  --claim "Treats the threshold as a consequence of the failure model" \
+  --claim-kind principle --claim-from 1,2 --claim-scope domain
+```
+
+This is a distillation-only operation. `--claim-from` contains exact one-based evidence
+indexes; the recorder adds no observation and changes no state, confidence, or date. Every
+source must exist and none may be inference. Scope defaults to `project`, with optional
+`--claim-condition`. The reader remains backward compatible: a v1 concept without this
+section is valid and simply has no semantic claims.
+
+Relevant claims are injected under a separate bounded budget. Constraints and preferences
+rank before principles and understandings because violating them has the highest immediate
+cost. Omitted claims are counted explicitly, and the complete model remains available in the
+hierarchical indexes and concept files.
+
+For an existing model, migration uses the same workflow for every installation:
+
+```bash
+~/.laconic/bin/laconic-migrate-v2 export --out /tmp/laconic-v2-bundle.json
+```
+
+The bundle contains numbered evidence, legacy distillations, and the machine-readable
+proposal contract, but does not mutate the model. An agent produces a
+`laconic-v2-proposals` document; the user reviews stable proposal ids in a
+`laconic-v2-decisions` document generated by `laconic-migrate-v2 review` alongside a readable
+Markdown review. `laconic-migrate-v2 apply` requires both documents and the
+exact migration id. It rejects a changed model, preflights accepted claims against a copy,
+runs the lint, then replaces only affected concept files under the model lock and commits the
+result. This makes the operation repeatable while preventing an install-specific cleanup
+script from becoming an undocumented migration path.
 
 ## Transcript bootstrap
 

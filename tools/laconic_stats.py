@@ -71,7 +71,67 @@ def main():
     ap.add_argument("--log", default=None)
     ap.add_argument("--since", default=None, help="ISO date, inclusive")
     ap.add_argument("--evidence", action="store_true", help="report evidence kinds and exit")
+    ap.add_argument(
+        "--maintenance", action="store_true",
+        help="report silent-maintenance trigger yield and exit",
+    )
+    ap.add_argument(
+        "--routing", action="store_true",
+        help="report prompt routing frequency and context cost, then exit",
+    )
     args = ap.parse_args()
+
+    if args.routing:
+        rows = load(home() / "routing-telemetry.jsonl")
+        if args.since:
+            rows = [row for row in rows if row.get("date", "") >= args.since]
+        if not rows:
+            print("no routing observations yet")
+            return 0
+        routed = [row for row in rows if row.get("domains")]
+        counts = Counter(domain for row in routed for domain in row.get("domains", []))
+        resolved = [row for row in routed if row.get("answer_domains") is not None]
+        used = [row for row in resolved if row.get("answer_domains")]
+        miss_resolved = [row for row in rows
+                         if row.get("routing_version", 1) >= 2
+                         and row.get("missed_domains") is not None]
+        missed_rows = [row for row in miss_resolved if row.get("missed_domains")]
+        missed = Counter(
+            domain for row in missed_rows for domain in row.get("missed_domains", [])
+        )
+        chars = [int(row.get("chars", 0)) for row in rows]
+        print(f"{len(rows)} prompts observed")
+        print(f"  routed: {len(routed)} ({100 * len(routed) / len(rows):.1f}%)")
+        print(f"  mean context per prompt: {sum(chars) / len(chars):.0f} chars")
+        print(f"  maximum context: {max(chars)} chars")
+        if resolved:
+            print(f"  answer mentioned a selected domain: {len(used)}/{len(resolved)} "
+                  f"({100 * len(used) / len(resolved):.1f}%)")
+        if miss_resolved:
+            print(f"  answer surfaced an unselected domain: "
+                  f"{len(missed_rows)}/{len(miss_resolved)} "
+                  f"({100 * len(missed_rows) / len(miss_resolved):.1f}%)")
+        print(f"  selected domains: {dict(counts.most_common(10))}")
+        if missed:
+            print(f"  possible missed domains: {dict(missed.most_common(10))}")
+        print("\nAnswer vocabulary is a routing proxy, not proof; inspect repeated misses before tuning.")
+        return 0
+
+    if args.maintenance:
+        rows = load(home() / "maintenance-telemetry.jsonl")
+        if args.since:
+            rows = [row for row in rows if row.get("date", "") >= args.since]
+        if not rows:
+            print("no maintenance observations yet")
+            return 0
+        signals = Counter(row.get("signal", "unknown") for row in rows)
+        recorded = sum(bool(row.get("recorded")) for row in rows)
+        print(f"{len(rows)} silent maintenance passes")
+        print(f"  produced a model record: {recorded} ({100 * recorded / len(rows):.1f}%)")
+        print(f"  left unchanged: {len(rows) - recorded}")
+        print(f"  trigger classes: {dict(signals.most_common())}")
+        print("\nThis is trigger yield, not recall: missed knowledge-bearing turns are not observed.")
+        return 0
 
     if args.evidence:
         counts, per_concept, theory = evidence_kinds()

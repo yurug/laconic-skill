@@ -204,6 +204,28 @@ class TestPromptRouting(HookTestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout, "")
 
+    def test_opted_in_routing_telemetry_contains_no_prompt(self):
+        self.create("rocq-proof-obligations", domain="formal-verification")
+        secret = "private-proof-7719"
+        env = self.env(LACONIC_TELEMETRY="1")
+        proc = self.hook(ROUTE, payload=json.dumps({
+            "prompt": f"Check these Rocq obligations {secret}",
+            "session_id": "raw-session-id",
+        }), env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        pending = next((self.home / ".routing-pending").glob("*.json"))
+        log = pending.read_text(encoding="utf-8")
+        self.assertNotIn(secret, log)
+        self.assertNotIn("raw-session-id", log)
+        row = json.loads(log)
+        self.assertEqual(row["domains"], ["formal-verification"])
+        self.assertGreater(row["chars"], 0)
+
+    def test_routing_telemetry_is_opt_in(self):
+        self.create("rocq-proof-obligations", domain="formal-verification")
+        self.hook(ROUTE, payload=json.dumps({"prompt": "Rocq obligations"}))
+        self.assertFalse((self.home / "routing-telemetry.jsonl").exists())
+
 class TestStopCheck(HookTestCase):
     def transcript(self, user_turns):
         path = self.home / "transcript.jsonl"
@@ -287,6 +309,50 @@ class TestStopCheck(HookTestCase):
         ))
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout.strip(), "")
+
+    def test_correction_gets_one_silent_maintenance_continuation(self):
+        path = self.transcript(1)
+        lines = path.read_text(encoding="utf-8").splitlines()
+        lines[-2] = json.dumps({
+            "type": "user", "message": {"content":
+                "Non, ce n'est pas un problème de cache : cet invariant est nécessaire."}
+        })
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        payload = json.dumps({
+            "stop_hook_active": False, "session_id": "s", "transcript_path": str(path),
+        })
+        proc = self.hook(STOP, payload=payload)
+        decision = json.loads(proc.stdout)
+        self.assertEqual(decision["decision"], "block")
+        self.assertIn("Silent Laconic maintenance pass", decision["reason"])
+        self.assertIn("Never mention", decision["reason"])
+
+    def test_maintenance_continuation_cannot_loop(self):
+        path = self.transcript(1)
+        lines = path.read_text(encoding="utf-8").splitlines()
+        lines[-2] = json.dumps({
+            "type": "user", "message": {"content": "Actually, preserve the invariant."}
+        })
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        proc = self.hook(STOP, payload=json.dumps({
+            "stop_hook_active": True, "session_id": "s", "transcript_path": str(path),
+        }))
+        self.assertEqual(proc.stdout, "")
+
+    def test_due_reconciliation_gets_one_silent_continuation(self):
+        self.create("theory", "--kind", "world", domain="testing")
+        proc = self.hook(STOP, payload=self.payload(turns=1, session="reconcile"))
+        decision = json.loads(proc.stdout)
+        self.assertEqual(decision["decision"], "block")
+        self.assertIn("periodic Laconic reconciliation", decision["reason"])
+        self.assertTrue((self.home / ".reconciliation-pending").exists())
+
+        proc = self.hook(STOP, payload=self.payload(
+            turns=1, stop_active=True, session="reconcile"
+        ))
+        self.assertEqual(proc.stdout, "")
+        self.assertTrue((self.home / ".reconciled-at").exists())
+        self.assertFalse((self.home / ".reconciliation-pending").exists())
 
 if __name__ == "__main__":
     unittest.main()

@@ -34,6 +34,9 @@ from laconic_index import (  # noqa: E402
     CAPABILITY_SCOPES,
     CAPABILITY_REF_RE,
     CAPABILITY_EXTENDED_RE,
+    ESTABLISHED_KNOWLEDGE,
+    KNOWLEDGE_KINDS,
+    KNOWLEDGE_SCOPES,
     NOT_ESTABLISHED,
     SUMMARY_AFTER,
     UNDERSTANDS,
@@ -500,6 +503,20 @@ def add_capability(body, kind, claim, today, scope="project", condition="",
     return set_section(body, CAPABILITIES, "\n".join(lines))
 
 
+def add_knowledge_claim(body, kind, claim, evidence_numbers, scope="project", condition=""):
+    """Append a semantic claim whose provenance is exact and mechanically checkable."""
+    claim = " ".join(claim.split())
+    sources = ", ".join(str(number) for number in evidence_numbers)
+    condition_suffix = f" [when: {condition}]" if condition else ""
+    line = f"- [{kind}] {claim} (evidence: {sources}) [scope: {scope}]{condition_suffix}"
+    current = get_section(body, ESTABLISHED_KNOWLEDGE)
+    lines = current.splitlines() if current else []
+    prefix = f"- [{kind}] {claim} (evidence: "
+    lines = [existing for existing in lines if not existing.startswith(prefix)]
+    lines.append(line)
+    return set_section(body, ESTABLISHED_KNOWLEDGE, "\n".join(lines))
+
+
 def retract_capability(concept_id, capability_id, reason, today):
     """Retain an invalid claim for audit while removing it from future injections."""
     path = home() / "concepts" / f"{concept_id}.md"
@@ -599,6 +616,13 @@ def main():
                     help="ISO date after which the capability is no longer injected")
     ap.add_argument("--capability-from", type=int, default=None, metavar="EVIDENCE_NUMBER",
                     help="distil an existing numbered strong observation without duplicating it")
+    ap.add_argument("--claim", default=None,
+                    help="established semantic knowledge distilled from existing evidence")
+    ap.add_argument("--claim-kind", choices=KNOWLEDGE_KINDS, default="understanding")
+    ap.add_argument("--claim-from", default=None, metavar="EVIDENCE_NUMBERS",
+                    help="comma-separated one-based evidence numbers supporting --claim")
+    ap.add_argument("--claim-scope", choices=KNOWLEDGE_SCOPES, default="project")
+    ap.add_argument("--claim-condition", default=None)
     ap.add_argument("--retract-capability", default=None,
                     help="retract this local capability id without deleting its history")
     ap.add_argument("--reason", default=None,
@@ -661,6 +685,10 @@ def main():
             "--capability-contradicts": args.capability_contradicts,
             "--capability-valid-until": args.capability_valid_until,
             "--capability-from": args.capability_from,
+            "--claim": args.claim, "--claim-from": args.claim_from,
+            "--claim-kind": args.claim_kind if args.claim_kind != "understanding" else None,
+            "--claim-scope": args.claim_scope if args.claim_scope != "project" else None,
+            "--claim-condition": args.claim_condition,
             "--retract-capability": args.retract_capability,
             "--reason": args.reason,
             "--understands": args.understands,
@@ -698,6 +726,10 @@ def main():
             "--capability-contradicts": args.capability_contradicts,
             "--capability-valid-until": args.capability_valid_until,
             "--capability-from": args.capability_from,
+            "--claim": args.claim, "--claim-from": args.claim_from,
+            "--claim-kind": args.claim_kind if args.claim_kind != "understanding" else None,
+            "--claim-scope": args.claim_scope if args.claim_scope != "project" else None,
+            "--claim-condition": args.claim_condition,
             "--basis": args.basis if args.basis != "direct" else None,
             "--confirmed": args.confirmed or None,
             "--source-ref": args.source_ref,
@@ -716,6 +748,8 @@ def main():
 
     if args.basis == "inference" and args.capability is not None:
         ap.error("--basis inference cannot establish a capability")
+    if args.basis == "inference" and args.claim is not None:
+        ap.error("--basis inference cannot establish knowledge")
     if args.basis == "inference" and args.confidence is not None:
         ap.error("--basis inference cannot set confidence")
     if args.source_ref is not None:
@@ -728,7 +762,8 @@ def main():
 
     distil_only = args.forget is None and args.evidence is None
     if (distil_only and args.understands is None and args.not_established is None
-            and args.capability is None and args.retract_capability is None):
+            and args.capability is None and args.claim is None
+            and args.retract_capability is None):
         ap.error("--evidence is required unless you pass --understands or --not-established")
     if (args.state is None and args.basis != "inference" and not distil_only and args.forget is None
             and args.retract_capability is None):
@@ -769,6 +804,26 @@ def main():
           or args.capability_supersedes is not None or args.capability_contradicts is not None
           or args.capability_valid_until is not None or args.capability_from is not None):
         ap.error("capability metadata and relations require --capability")
+
+    if args.claim is not None:
+        if args.evidence is not None:
+            ap.error("--claim distils existing evidence; it cannot be combined with --evidence")
+        if args.claim_from is None:
+            ap.error("--claim requires --claim-from")
+        if not args.claim.strip() or any(char in args.claim for char in ("\n", "\r", "]")):
+            ap.error("--claim must be one non-empty line without ']'")
+        if args.claim_condition is not None and (
+                not args.claim_condition.strip() or "]" in args.claim_condition):
+            ap.error("--claim-condition must be non-empty and cannot contain ']'")
+        try:
+            claim_sources = [int(value.strip()) for value in args.claim_from.split(",")]
+        except (TypeError, ValueError):
+            ap.error("--claim-from expects comma-separated one-based evidence numbers")
+        if any(number < 1 for number in claim_sources) or len(set(claim_sources)) != len(claim_sources):
+            ap.error("--claim-from expects unique one-based evidence numbers")
+    elif (args.claim_from is not None or args.claim_kind != "understanding"
+          or args.claim_scope != "project" or args.claim_condition is not None):
+        ap.error("claim metadata requires --claim")
 
     if not ID_RE.match(args.concept_id):
         print(f"error: id '{args.concept_id}' must be lowercase kebab-case", file=sys.stderr)
@@ -854,6 +909,12 @@ def apply_record(args, today, quiet=False):
     capability_condition = getattr(args, "capability_condition", None) or ""
     capability_valid_until = getattr(args, "capability_valid_until", None) or ""
     capability_from = getattr(args, "capability_from", None)
+    knowledge_claim = getattr(args, "claim", None)
+    claim_sources = [int(value.strip()) for value in
+                     (getattr(args, "claim_from", None) or "").split(",") if value.strip()]
+    claim_kind = getattr(args, "claim_kind", "understanding")
+    claim_scope = getattr(args, "claim_scope", "project")
+    claim_condition = getattr(args, "claim_condition", None) or ""
     basis = getattr(args, "basis", None) or (
         "confirmation" if getattr(args, "confirmed", False) else "direct"
     )
@@ -990,12 +1051,37 @@ def apply_record(args, today, quiet=False):
     if not body.strip():
         summary = args.summary or f"{args.concept_id.replace('-', ' ')}."
         body = (f"{summary}\n\n## {CAPABILITIES}\n\n"
+                f"## {ESTABLISHED_KNOWLEDGE}\n\n"
                 f"## {UNDERSTANDS}\n\n## {NOT_ESTABLISHED}\n")
 
     if args.understands is not None:
         body = set_section(body, UNDERSTANDS, args.understands)
     if args.not_established is not None:
         body = set_section(body, NOT_ESTABLISHED, args.not_established)
+    if knowledge_claim is not None:
+        missing_sources = [number for number in claim_sources if number > len(evidence)]
+        if missing_sources:
+            print(
+                f"error: --claim-from references evidence beyond the {len(evidence)} "
+                f"recorded observation(s): {', '.join(map(str, missing_sources))}",
+                file=sys.stderr,
+            )
+            return 2
+        inferred = []
+        for number in claim_sources:
+            if re.search(r"\[basis: inference\]", evidence[number - 1]):
+                inferred.append(number)
+        if inferred:
+            print(
+                "error: inferred evidence cannot establish knowledge (evidence "
+                + ", ".join(f"#{number}" for number in inferred) + ")",
+                file=sys.stderr,
+            )
+            return 2
+        body = add_knowledge_claim(
+            body, claim_kind, knowledge_claim, claim_sources, claim_scope,
+            claim_condition.strip(),
+        )
     if capability is not None:
         capability_kind, capability_date = args.kind, today
         if capability_from is not None:

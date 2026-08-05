@@ -44,6 +44,7 @@ depending on whether laconic is a plugin or a bare skill:
 ~/.laconic/bin/laconic-lint      # validate the model
 ~/.laconic/bin/laconic-candidates # review strong evidence awaiting distillation
 ~/.laconic/bin/laconic-bootstrap  # prepare a consented transcript review bundle
+~/.laconic/bin/laconic-migrate-v2 # reviewed migration to sourced semantic claims
 ~/.laconic/bin/laconic-review     # validate and render agent proposals; never apply them
 ~/.laconic/bin/laconic-review-web # review proposals and persist accept/reject decisions
 ~/.laconic/bin/laconic-apply-review # apply explicitly accepted proposals after preflight
@@ -60,6 +61,20 @@ Then just work. The model starts empty and accumulates evidence as the agent obs
 work; nothing is promoted without a dated observation you can inspect. Ordinary routing,
 recording, and opportunistic distillation are agent responsibilities: after installation,
 you do not need to run a command, curate an index, or answer maintenance prompts.
+
+Explicit corrections and substantial explanations trigger one silent end-of-turn maintenance
+pass. The deterministic hook never interprets or writes knowledge: it only asks the main
+agent to inspect the latest direct user message. The agent records at most one narrow,
+supported observation, or does nothing. Ordinary requests take no extra pass, an existing
+record suppresses it, and the hook continuation cannot loop.
+
+Once every 30 days, Laconic also runs a silent model-only reconciliation when mechanical
+signals exist: effective state decay, expired capabilities, explicit contradiction relations,
+or strong evidence awaiting distillation. Retrieval already honors decay and expiry, so the
+agent changes stored claims only when direct evidence warrants it. A completed review advances
+the interval even when conservative inspection changes nothing. Three undistilled strong
+observations or an explicit contradiction can trigger an earlier pass; the findings signature
+prevents the same deliberately unchanged backlog from triggering again.
 
 Two privacy boundaries deliberately remain explicit. A deep bootstrap must obtain scoped
 consent before reading historical transcripts, and any external disclosure needs separate
@@ -140,9 +155,16 @@ manifest JSON; the Claude CLI performs its additional manifest validation when a
 
 Optional local telemetry can measure how often the knowledge model changes the writing. It
 is disabled by default. Set `LACONIC_TELEMETRY=1` in the environment that launches Claude
-Code to enable it, then run `~/.laconic/bin/laconic-stats`. The log contains concept ids,
-states, booleans and response lengths—never prompt or response text—and remains outside the
-synced model at `~/.laconic/telemetry.jsonl`.
+Code to enable it, then run `~/.laconic/bin/laconic-stats`. Add `--maintenance` to report how
+many silent passes produced a record, remained unchanged, and which trigger class fired. The
+`--routing` report shows selection frequency, context cost, and selected domains. The logs
+contain concept ids, hashed session ids, domain names, signal classes, states, booleans and
+lengths—never prompt or response text—and remain outside the synced model. Maintenance yield
+does not measure missed knowledge-bearing turns. Routing also reports whether the final answer
+mentioned vocabulary from a selected domain. This is a usefulness proxy, not proof: context
+can matter without being named, and a name can appear without the context being useful.
+The same report lists domains whose vocabulary surfaced without having been selected. Treat
+repeated occurrences as alias/index candidates, not individual occurrences as proven misses.
 
 If you try it, tell me what broke: issues, pull requests, and a plain "this made no sense to
 me" are all welcome.

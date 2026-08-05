@@ -36,7 +36,7 @@ class TestAtomicWrite(unittest.TestCase):
 
 
 def concept(cid, state="exposed", domain="testing", observations=1, gap="", projects=(),
-            last_updated="2026-07-28", capabilities=(), strong_evidence=()):
+            last_updated="2026-07-28", capabilities=(), strong_evidence=(), knowledge=()):
     return {
         "id": cid,
         "state": state,
@@ -46,8 +46,61 @@ def concept(cid, state="exposed", domain="testing", observations=1, gap="", proj
         "projects": list(projects),
         "last-updated": last_updated,
         "capabilities": list(capabilities),
+        "knowledge": list(knowledge),
         "strong_evidence": list(strong_evidence),
     }
+
+
+class TestEstablishedKnowledge(unittest.TestCase):
+    def test_parses_sourced_claims_and_defaults_to_project_scope(self):
+        body = """## Established knowledge
+- [understanding] Explains why the cache is bounded (evidence: 1, 3)
+- [constraint] Requires offline operation (evidence: 2) [scope: general] [when: travelling]
+"""
+        self.assertEqual(L.parse_knowledge_claims(body), [
+            {"kind": "understanding", "claim": "Explains why the cache is bounded",
+             "evidence": [1, 3], "scope": "project", "condition": ""},
+            {"kind": "constraint", "claim": "Requires offline operation",
+             "evidence": [2], "scope": "general", "condition": "travelling"},
+        ])
+
+    def test_legacy_body_without_v2_section_is_unchanged(self):
+        self.assertEqual(L.parse_knowledge_claims("## What has not been established\nA gap"), [])
+
+    def test_project_and_domain_claims_are_contextual(self):
+        claims = (
+            {"kind": "principle", "claim": "Keep changes reversible", "evidence": [1],
+             "scope": "project", "condition": ""},
+            {"kind": "understanding", "claim": "Understands the invariant", "evidence": [1],
+             "scope": "domain", "condition": ""},
+            {"kind": "preference", "claim": "Prefers concise reports", "evidence": [1],
+             "scope": "general", "condition": ""},
+        )
+        here = concept("here", projects=("/work/here",), domain="systems", knowledge=claims)
+        elsewhere = concept("elsewhere", projects=("/work/elsewhere",), domain="other",
+                            knowledge=claims[:2])
+        selected = L.select_knowledge([here, elsewhere], "/work/here")
+        self.assertEqual([item["claim"] for item in selected], [
+            "Prefers concise reports", "Keep changes reversible", "Understands the invariant"
+        ])
+
+    def test_render_is_bounded_and_reports_omissions(self):
+        claims = [{"id": f"c{i}", "kind": "understanding", "scope": "general",
+                   "claim": "x" * 200, "evidence": [1], "condition": ""}
+                  for i in range(10)]
+        rendered = L.render_knowledge(claims)
+        self.assertIn("more knowledge claims over budget", rendered)
+        self.assertLessEqual(sum(line.startswith("- c") for line in rendered.splitlines()),
+                             L.KNOWLEDGE_LIMIT)
+
+    def test_domain_leaf_includes_domain_and_general_but_not_project_claims(self):
+        claims = tuple(
+            {"kind": "understanding", "claim": scope, "evidence": [1],
+             "scope": scope, "condition": ""}
+            for scope in ("project", "domain", "general")
+        )
+        selected = L.select_knowledge([concept("one", domain="systems", knowledge=claims)], None)
+        self.assertEqual({item["scope"] for item in selected}, {"domain", "general"})
 
 
 class TestDecay(unittest.TestCase):
@@ -491,8 +544,10 @@ class TestStableCommandPath(ModelTestCase):
         r = self.index("--ensure-bin")
         self.assertEqual(r.code, 0, r.text)
         for name in ("laconic-record", "laconic-lint", "laconic-index",
-                     "laconic-candidates", "laconic-bootstrap", "laconic-review",
-                     "laconic-review-web", "laconic-apply-review"):
+                     "laconic-status", "laconic-stats", "laconic-candidates",
+                     "laconic-bootstrap", "laconic-review", "laconic-review-web",
+                     "laconic-apply-review", "laconic-maintenance",
+                     "laconic-route-observe", "laconic-reconcile"):
             self.assertTrue((self.home / "bin" / name).exists(), name)
 
     def test_wrappers_are_executable(self):

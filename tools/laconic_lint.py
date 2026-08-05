@@ -18,6 +18,8 @@ from laconic_index import (  # noqa: E402
     CAPABILITIES,
     CAPABILITY_EXTENDED_RE,
     CAPABILITY_REF_RE,
+    ESTABLISHED_KNOWLEDGE,
+    KNOWLEDGE_RE,
     NOT_ESTABLISHED,
     STATES,
     SUMMARY_AFTER,
@@ -212,6 +214,28 @@ def check_concept(path, report, today):
                 report.error(path, "retracted capability has no retraction reason")
         elif reason:
             report.error(path, "capability has a retraction reason but no retraction date")
+
+    knowledge_lines = [
+        line.strip() for line in get_section(body, ESTABLISHED_KNOWLEDGE).splitlines()
+        if line.strip()
+    ]
+    for line in knowledge_lines:
+        match = KNOWLEDGE_RE.fullmatch(line)
+        if not match:
+            report.error(path, f"malformed established knowledge claim: {line[:60]}")
+            continue
+        sources = [int(value) for value in match.group(3).split(", ")]
+        if len(sources) != len(set(sources)):
+            report.error(path, "established knowledge claim repeats an evidence reference")
+        for source_number in sources:
+            if source_number > len(evidence):
+                report.error(
+                    path,
+                    f"knowledge source evidence #{source_number} exceeds the "
+                    f"{len(evidence)} recorded observation(s)",
+                )
+            elif "[basis: inference]" in evidence[source_number - 1]:
+                report.error(path, "inferred evidence cannot establish knowledge")
 
     # Credentials in a committed file. An error, not a warning: a configured remote could
     # sync it while someone decided what to do about it.

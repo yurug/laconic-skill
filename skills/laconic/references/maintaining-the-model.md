@@ -55,6 +55,9 @@ One sentence on what the concept is.
 ## Established capabilities
 - [justification] Can explain why finality waits for this threshold (evidence: 2026-07-20) [scope: project]
 
+## Established knowledge
+- [principle] Treats the threshold as a consequence of the failure model (evidence: 1) [scope: domain]
+
 ## What the user understands about it
 ## What has not been established
 ```
@@ -110,6 +113,23 @@ cannot establish a capability, including through `--capability-from`. Omit `--st
 recording inference; the current state is preserved, or a new concept starts at `unknown`.
 The lint rejects a capability whose source index is absent, mismatched, or inferred.
 
+## Established knowledge claims
+
+When existing evidence supports a stable proposition richer than the concept state, distil
+it without adding evidence:
+
+```bash
+~/.laconic/bin/laconic-record tezos-finality \
+  --claim "Treats the threshold as a consequence of the failure model" \
+  --claim-kind principle --claim-from 1,2 --claim-scope domain
+```
+
+Kinds are `understanding`, `principle`, `constraint`, and `preference`. Scope is `project`
+by default; widen it only when the cited evidence supports transfer. Every claim must cite
+one or more exact evidence numbers. Inferred evidence cannot establish a claim. Use
+`--claim-condition` for a condition that bounds applicability. A legacy file without the
+section remains valid.
+
 ## The two prose sections
 
 The body also carries **established capabilities**. Record one in the same call as the strong
@@ -138,6 +158,25 @@ interpretation. Distil a listed item with
 `--capability-from <evidence-number> --capability "narrow demonstrated ability"`; the tool
 reuses the source kind and date without appending evidence or moving state. If the evidence
 does not support one narrow claim, leave it silently.
+
+## Silent per-turn maintenance
+
+The Stop hook can request one internal continuation after an explicit correction or a
+substantial justification. This is only a high-precision attention signal. Re-read the latest
+direct user message and apply the ordinary evidence rules; record at most one narrow
+observation, or none. Do not quote confidential material, mention the maintenance pass, or
+infer prerequisites. If the turn already invoked the recorder, the hook stays silent. The
+continuation is marked active on its next Stop, which makes repetition impossible.
+
+When `LACONIC_TELEMETRY=1` is already enabled, `laconic-stats --maintenance` reports trigger
+classes and whether the recorder was invoked. The log contains a hashed session id and no
+transcript text. Interpret this only as trigger yield: a no-op can be a correct abstention or
+a miss, and an invocation is not independent proof that the record was well calibrated.
+
+`laconic-stats --routing` reports selection rate, injected characters, hot domains, and the
+share of routed answers mentioning vocabulary from a selected domain. The resolver stores no
+answer text and consumes its pending row at Stop. Treat answer mention only as a proxy for
+use: a domain may shape an answer without being named, or be named incidentally.
 
 Give a capability a stable `--capability-id` when another capability refers to it. Relations
 use qualified `concept/capability-id` references:
@@ -298,6 +337,22 @@ block every later one.
 This exists because the earlier behaviour was to proceed *without* the lock after the wait,
 which traded a loud failure for a silent lost update — two recorders each appending to the
 same base, one observation gone.
+
+## Periodic reconciliation
+
+Every 30 days at most, `laconic-reconcile --begin` can request one silent continuation when
+it finds effective decay, expired capabilities, explicit contradiction links, or undistilled
+strong evidence. Run `laconic-reconcile` for the bounded report. Treat each line as an
+attention signal, not an instruction to mutate:
+
+- leave stored states intact when effective decay already makes retrieval conservative;
+- leave expired capabilities as historical claims unless evidence shows they became false;
+- resolve an explicit contradiction only from direct evidence;
+- for each undistilled `justification` or `modification`, either distil a narrow demonstrated
+  ability or deliberately classify it as only a preference/constraint; never silently skip it.
+
+The next Stop marks the review complete even when no write was justified. Never ask the user
+to service this queue.
 
 ## Never
 

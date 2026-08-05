@@ -1,6 +1,7 @@
 """The localhost console cannot be used cross-origin or bypass model invariants."""
 
 import os
+from pathlib import Path
 from unittest import mock
 
 from helpers import ModelTestCase
@@ -9,6 +10,7 @@ from laconic_console import (
     SECURITY_HEADERS,
     delete_concept,
     edit_metadata,
+    human_label,
     request_is_json,
     request_is_same_origin,
     read_concept,
@@ -33,6 +35,13 @@ class ConsoleTestCase(ModelTestCase):
 
 
 class TestRequestBoundary(ConsoleTestCase):
+    def test_console_exposes_structured_navigation_controls(self):
+        ui = (Path(__file__).parent.parent / "tools" / "console_ui.html").read_text()
+        for control in ('id="search"', 'id="domain"', 'id="kind"', 'id="scope"',
+                        'id="sort"', 'data-view="${id}"'):
+            self.assertIn(control, ui)
+        self.assertIn('NAV={view:"claims"', ui)
+
     def test_model_read_rejects_an_unexpected_host(self):
         self.assertFalse(
             request_is_same_origin({"Host": "attacker.example"}, 7642)
@@ -66,6 +75,25 @@ class TestRequestBoundary(ConsoleTestCase):
 
 
 class TestMutationIntegrity(ConsoleTestCase):
+    def test_storage_ids_get_readable_labels(self):
+        self.assertEqual(human_label("pbc-prepared-by-client"), "PBC — Prepared By Client")
+        self.assertEqual(human_label("rust-pin"), "Rust Pin")
+
+    def test_tautological_summary_is_not_presented_as_meaning(self):
+        self.create("rust-pin")
+        concept = read_concept(self.path("rust-pin"))
+        self.assertEqual(concept["label"], "Rust Pin")
+        self.assertEqual(concept["summary"], "")
+
+    def test_read_exposes_established_semantic_knowledge(self):
+        self.create("thing", evidence="explained the invariant")
+        result = self.record("thing", "--claim", "Treats it as an invariant",
+                             "--claim-kind", "principle", "--claim-from", "1")
+        self.assertEqual(result.code, 0, result.text)
+        concept = read_concept(self.path("thing"))
+        self.assertEqual(concept["knowledge"][0]["claim"], "Treats it as an invariant")
+        self.assertEqual(concept["knowledge"][0]["evidence"], [1])
+
     def test_read_exposes_established_capabilities(self):
         self.create(
             "thing", "--kind", "world", "--capability", "Can map it to the domain",

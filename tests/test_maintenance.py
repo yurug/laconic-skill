@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from helpers import TOOLS  # also places the dependency-free tools directory on sys.path
 import laconic_maintenance as M
 
 

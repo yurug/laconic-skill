@@ -181,6 +181,16 @@ class TestSubagentPolicy(HookTestCase):
 
 
 class TestPromptRouting(HookTestCase):
+    def test_correction_requests_private_in_turn_maintenance(self):
+        proc = self.hook(ROUTE, payload=json.dumps({
+            "prompt": "Non, ce n'est pas le cache : cet invariant est nécessaire.",
+            "session_id": "s",
+        }))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        context = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Silent Laconic maintenance", context)
+        self.assertNotIn("decision", json.loads(proc.stdout))
+
     def test_relevant_domain_is_loaded_without_user_action(self):
         self.create("rocq-proof-obligations", domain="formal-verification")
         proc = self.hook(ROUTE, payload=json.dumps({
@@ -310,7 +320,7 @@ class TestStopCheck(HookTestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout.strip(), "")
 
-    def test_correction_gets_one_silent_maintenance_continuation(self):
+    def test_correction_never_blocks_stop_or_surfaces_as_hook_error(self):
         path = self.transcript(1)
         lines = path.read_text(encoding="utf-8").splitlines()
         lines[-2] = json.dumps({
@@ -322,10 +332,8 @@ class TestStopCheck(HookTestCase):
             "stop_hook_active": False, "session_id": "s", "transcript_path": str(path),
         })
         proc = self.hook(STOP, payload=payload)
-        decision = json.loads(proc.stdout)
-        self.assertEqual(decision["decision"], "block")
-        self.assertIn("Silent Laconic maintenance pass", decision["reason"])
-        self.assertIn("Never mention", decision["reason"])
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout, "")
 
     def test_maintenance_continuation_cannot_loop(self):
         path = self.transcript(1)
@@ -339,17 +347,16 @@ class TestStopCheck(HookTestCase):
         }))
         self.assertEqual(proc.stdout, "")
 
-    def test_due_reconciliation_gets_one_silent_continuation(self):
+    def test_stop_only_completes_reconciliation_without_blocking(self):
         self.create("theory", "--kind", "world", domain="testing")
-        proc = self.hook(STOP, payload=self.payload(turns=1, session="reconcile"))
-        decision = json.loads(proc.stdout)
-        self.assertEqual(decision["decision"], "block")
-        self.assertIn("periodic Laconic reconciliation", decision["reason"])
+        # UserPromptSubmit begins the private in-turn review.
+        routed = self.hook(ROUTE, payload=json.dumps({
+            "prompt": "Review the theory", "session_id": "reconcile",
+        }))
+        self.assertIn("Silent Laconic reconciliation", json.loads(routed.stdout)
+                      ["hookSpecificOutput"]["additionalContext"])
         self.assertTrue((self.home / ".reconciliation-pending").exists())
-
-        proc = self.hook(STOP, payload=self.payload(
-            turns=1, stop_active=True, session="reconcile"
-        ))
+        proc = self.hook(STOP, payload=self.payload(turns=1, session="reconcile"))
         self.assertEqual(proc.stdout, "")
         self.assertTrue((self.home / ".reconciled-at").exists())
         self.assertFalse((self.home / ".reconciliation-pending").exists())

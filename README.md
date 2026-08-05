@@ -62,11 +62,11 @@ work; nothing is promoted without a dated observation you can inspect. Ordinary 
 recording, and opportunistic distillation are agent responsibilities: after installation,
 you do not need to run a command, curate an index, or answer maintenance prompts.
 
-Explicit corrections and substantial explanations trigger one silent end-of-turn maintenance
-pass. The deterministic hook never interprets or writes knowledge: it only asks the main
-agent to inspect the latest direct user message. The agent records at most one narrow,
-supported observation, or does nothing. Ordinary requests take no extra pass, an existing
-record suppresses it, and the hook continuation cannot loop.
+Explicit corrections and substantial explanations add a private maintenance instruction to
+the same user-prompt context. The deterministic hook never interprets or writes knowledge: it
+only asks the main agent to inspect the direct user message. The agent records at most one
+narrow, supported observation, or does nothing. No Stop hook continuation is used, because
+Claude Code renders every Stop block as a visible hook error.
 
 Once every 30 days, Laconic also runs a silent model-only reconciliation when mechanical
 signals exist: effective state decay, expired capabilities, explicit contradiction relations,

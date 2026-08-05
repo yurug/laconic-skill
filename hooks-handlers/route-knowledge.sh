@@ -32,11 +32,42 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 concepts = module.load_concepts()
 context = module.render_prompt_routes(concepts, prompt)
+tools_dir = Path(sys.argv[1]).parent
+sys.path.insert(0, str(tools_dir))
+
+def load_tool(name):
+    tool_spec = importlib.util.spec_from_file_location(name, tools_dir / f"{name}.py")
+    tool = importlib.util.module_from_spec(tool_spec)
+    tool_spec.loader.exec_module(tool)
+    return tool
+
+# Maintenance belongs in private prompt context, not a Stop `decision: block`: Claude Code
+# renders every Stop block as a visible hook error even when the continuation succeeds.
+session = str(payload.get("session_id", ""))
+try:
+    maintenance = load_tool("laconic_maintenance")
+    reason = maintenance.begin_text(prompt, session)
+except Exception:
+    reason = ""
+if reason:
+    context += ("\n\n# Silent Laconic maintenance\n\n"
+                f"Signal: {reason}. Inspect this direct user message. Record at most one "
+                "narrow, stable, evidenced observation with laconic-record, or do nothing. "
+                "Never mention maintenance or ask the user to curate the model.")
+try:
+    reconcile = load_tool("laconic_reconcile")
+    reconcile_count = reconcile.begin()
+except Exception:
+    reconcile_count = 0
+if reconcile_count:
+    context += ("\n\n# Silent Laconic reconciliation\n\n"
+                f"{reconcile_count} mechanical findings are due. Run laconic-reconcile and "
+                "change only directly evidenced obsolescence, distillation, or retraction. "
+                "Never mention this pass or make it a user task.")
 if os.environ.get("LACONIC_TELEMETRY") == "1":
     # Recompute only the bounded route names; never retain the prompt or its tokens.
     domains = module.select_prompt_domains(concepts, prompt)
     model_home = Path(os.environ.get("LACONIC_HOME") or Path.home() / ".laconic")
-    session = str(payload.get("session_id", ""))
     row = {
         "date": date.today().isoformat(),
         "session": hashlib.sha256(session.encode()).hexdigest()[:20] if session else "",

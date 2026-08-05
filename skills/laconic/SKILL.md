@@ -151,8 +151,8 @@ Three rules matter often enough to state here:
   does not duplicate evidence or move the concept state. If no narrow claim is directly
   supported, leave it silently. Never ask the user to curate concepts, indexes, candidates,
   or routine maintenance; those are implementation details.
-- **Treat the silent maintenance continuation as a gate, not evidence.** When the Stop hook
-  requests a pass after an explicit correction or justification, inspect only the latest
+- **Treat private same-turn maintenance context as a gate, not evidence.** When the prompt hook
+  requests inspection after an explicit correction or justification, inspect only the latest
   direct user message. Record at most one narrow paraphrased observation when it directly
   demonstrates stable knowledge; otherwise finish unchanged. Never mention the pass. The
   trigger classification does not justify a state, domain, capability, or inference by itself.

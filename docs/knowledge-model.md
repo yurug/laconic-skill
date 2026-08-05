@@ -79,20 +79,19 @@ Inference may omit `--state`, preserving the current value or using `unknown` on
 
 ### Silent ongoing maintenance
 
-The `Stop` hook mechanically recognizes only explicit corrections and substantial
-justifications in the latest direct user message. It never turns those words into model data.
-Instead it grants the main agent one silent continuation to decide whether the message
+The `UserPromptSubmit` hook mechanically recognizes only explicit corrections and substantial
+justifications in the direct user message. It never turns those words into model data.
+Instead it adds a private same-turn instruction asking the main agent whether the message
 directly demonstrates stable knowledge. The agent records one narrow paraphrase or leaves the
-model unchanged. A recorder invocation in the same turn suppresses the pass, and
-`stop_hook_active` prevents recursive maintenance. The hook reason contains only the signal
-class, never transcript text.
+model unchanged. Stop blocks are deliberately not used: Claude Code displays them as hook
+errors even when they are intended only to continue work.
 
 This is intentionally narrower than transcript bootstrap. It improves capture recall without
 making a regex an epistemic authority; deeper historical inference remains consent-gated.
 With existing `LACONIC_TELEMETRY=1` consent, the hook also records the signal class and whether
-the continuation invoked the recorder in `~/.laconic/maintenance-telemetry.jsonl`. It hashes
+the same turn invoked the recorder in `~/.laconic/maintenance-telemetry.jsonl`. It hashes
 the session id and stores no transcript content. `laconic-stats --maintenance` reports this
-yield. An unchanged pass may be a correct abstention or a missed record, so the result is not
+yield. An unchanged inspection may be a correct abstention or a missed record, so the result is not
 precision or recall without an independently reviewed sample.
 
 The prompt router uses the same telemetry consent to append selected domain names and injected
@@ -111,11 +110,11 @@ answer.
 
 ### Periodic reconciliation
 
-At most once every 30 days, the Stop hook runs `laconic-reconcile --begin`. A silent agent
-continuation occurs only when the mechanical report contains an effective state decay, an
+At most once every 30 days, the prompt hook runs `laconic-reconcile --begin`. Private same-turn
+context is added only when the mechanical report contains an effective state decay, an
 expired capability, a pair linked by an explicit `contradicts` relation, or undistilled strong
 evidence. The agent inspects `laconic-reconcile`, applies ordinary evidence rules, and may
-leave every item unchanged. The continuation then writes `.reconciled-at`; this prevents
+leave every item unchanged. The following Stop finalizes `.reconciled-at` without blocking; this prevents
 repeated prompts while preserving conservative decisions.
 
 Three undistilled strong observations or any explicit contradiction may bring the pass forward.

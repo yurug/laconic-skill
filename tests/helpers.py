@@ -58,6 +58,11 @@ class ModelTestCase(unittest.TestCase):
 
     def env(self, **extra):
         e = dict(os.environ)
+        # The suite often runs inside a session that has opted into telemetry or the
+        # experiment; inheriting those would flip opt-in behaviour on for every test.
+        # Tests that want them state so through `extra`.
+        for opt_in in ("LACONIC_TELEMETRY", "LACONIC_EXPERIMENT", "LACONIC_PUSH"):
+            e.pop(opt_in, None)
         e["LACONIC_HOME"] = str(self.home)
         e["LACONIC_NO_PUSH"] = "1"
         # Git may start automatic maintenance after a commit and outlive the recorder.

@@ -57,6 +57,36 @@ class MaintenanceTest(unittest.TestCase):
         path = self.transcript(self.user("Actually, the invariant is the important part."), tool)
         self.assertEqual(M.should_review(path), "")
 
+    def test_injected_maintenance_instruction_is_not_a_recording(self):
+        # The instruction names the recorder and arrives as an event after the user turn;
+        # only an actual command may count as a recording, or resolve() reports success
+        # for every signalled turn and should_review() suppresses real reviews.
+        instruction = {"type": "attachment", "message": {"content": [{
+            "type": "text",
+            "text": "# Silent Laconic maintenance\nRecord at most one narrow, "
+                    "stable observation with laconic-record, or do nothing.",
+        }]}}
+        path = self.transcript(self.user("Actually, the invariant is the important part."),
+                               instruction)
+        self.assertFalse(M.recorder_used([instruction]))
+        self.assertEqual(M.should_review(path), "explicit correction")
+
+    def test_pasted_terminal_output_is_silent(self):
+        text = ("λ ~/ gcloud compute ssh feed-1 --zone=europe-west1-b\n"
+                "ls: cannot access 'feed': No such file or directory")
+        self.assertEqual(M.should_review(self.transcript(self.user(text))), "")
+
+    def test_mid_sentence_negation_is_not_a_correction(self):
+        path = self.transcript(
+            self.user("There is no file at that path, use tabs instead of spaces."))
+        self.assertEqual(M.should_review(path), "")
+
+    def test_correction_after_a_paste_still_fires(self):
+        text = ("λ ~/ cargo test\nerror: expected struct\n"
+                "Actually, the invariant lives in the parser.")
+        self.assertEqual(M.should_review(self.transcript(self.user(text))),
+                         "explicit correction")
+
     def test_tool_results_do_not_replace_latest_real_prompt(self):
         tool_result = {"type": "user", "message": {"content": [
             {"type": "tool_result", "content": "not a prompt"}

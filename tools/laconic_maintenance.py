@@ -11,15 +11,21 @@ import hashlib
 import json
 import os
 import re
-import sys
 from datetime import date
 from pathlib import Path
 
+# A correction is a reaction, not a mention: the cue must open the message or a sentence,
+# and the bare negations must be punctuated as interjections ("No, ..." / "Non :"), so that
+# "there is no file" and a pasted "No such file or directory" line stay silent.
 CORRECTION_RE = re.compile(
-    r"\b(?:actually|correction|instead|no|not exactly|rather|"
-    r"en fait|non|pas exactement|plut[oô]t|ce n['’]est pas)\b",
-    re.IGNORECASE,
+    r"(?:^|[.!?…]\s+)(?:(?:no|non)\s*[,;:—–-]|"
+    r"(?:actually|correction|instead|not exactly|rather|"
+    r"en fait|pas exactement|plut[oô]t|ce n['’]est pas)\b)",
+    re.IGNORECASE | re.MULTILINE,
 )
+# Pasted terminal content is never a correction, whatever words it contains. Dropping only
+# prompt-shaped and ANSI-coloured lines keeps prose that follows a paste eligible.
+TERMINAL_LINE_RE = re.compile(r"\x1b\[|^\s*(?:[λ❯➜]|[$%#]\s)")
 RATIONALE_RE = re.compile(
     r"\b(?:because|the reason|so that|therefore|"
     r"parce que|la raison|afin de|donc|c['’]est pourquoi)\b",
@@ -62,14 +68,31 @@ def latest_turn(path):
 
 
 def recorder_used(events):
-    """Conservative raw scan: if this turn already recorded, never request another pass."""
-    return any(
-        marker in json.dumps(event, ensure_ascii=False)
-        for event in events for marker in RECORDER_MARKERS
+    """The recorder counts only when a command actually invoked it. Raw event text never
+    matches: the injected policy and the maintenance instruction both name the tool, and
+    they arrive as attachment events inside this same window."""
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        content = event.get("message", {}).get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                command = str((block.get("input") or {}).get("command", ""))
+                if any(marker in command for marker in RECORDER_MARKERS):
+                    return True
+    return False
+
+
+def prose_only(text):
+    return "\n".join(
+        line for line in text.splitlines() if not TERMINAL_LINE_RE.search(line)
     )
 
 
 def review_reason(text):
+    text = prose_only(text)
     if CORRECTION_RE.search(text):
         return "explicit correction"
     # A short command containing “because” is often just task rationale. Requiring some

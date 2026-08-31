@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import tempfile
+import unicodedata
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
@@ -49,6 +50,15 @@ KNOWLEDGE_RE = re.compile(
     r"\(evidence: ([1-9][0-9]*(?:, [1-9][0-9]*)*)\)"
     r"(?: \[scope: (project|domain|general)\])?"
     r"(?: \[when: ([^\]]+)\])?$"
+)
+KNOWLEDGE_EXTENDED_RE = re.compile(
+    KNOWLEDGE_RE.pattern[:-1]
+    + r"(?: \[id: ([a-z0-9][a-z0-9-]*)\])?"
+      r"(?: \[supersedes: ([^\]]+)\])?"
+      r"(?: \[contradicts: ([^\]]+)\])?"
+      r"(?: \[confirmed: (\d{4}-\d{2}-\d{2})\])?"
+      r"(?: \[retracted: (\d{4}-\d{2}-\d{2})\])?"
+      r"(?: \[retraction-reason: ([^\]]+)\])?$"
 )
 CAPABILITY_KINDS = ("world", "justification", "modification")
 CAPABILITY_SCOPES = ("project", "domain", "general")
@@ -134,6 +144,9 @@ ROUTE_STOPWORDS = {
     "just", "mais", "more", "pour", "that", "this", "tout", "une", "vous", "what",
     "when", "with", "your",
 }
+# Ligatures NFKD leaves intact, so accent folding alone would still split the word.
+# 'mise en œuvre' is ordinary French administrative prose, not an edge case.
+ROUTE_LIGATURES = {"œ": "oe", "æ": "ae", "ß": "ss"}
 
 
 # Stable command names under ~/.laconic/bin, mapped to the scripts they run.
@@ -153,6 +166,7 @@ SHIMS = {
     "laconic-route-observe": "laconic_route_observe.py",
     "laconic-reconcile": "laconic_reconcile.py",
     "laconic-migrate-v2": "laconic_migrate_v2.py",
+    "laconic-structure": "laconic_structure.py",
 }
 
 
@@ -242,14 +256,21 @@ def parse_knowledge_claims(body):
     """Read sourced semantic claims; files without this v2 section remain valid."""
     out = []
     for line in get_section(body, ESTABLISHED_KNOWLEDGE).splitlines():
-        match = KNOWLEDGE_RE.fullmatch(line.strip())
+        match = KNOWLEDGE_EXTENDED_RE.fullmatch(line.strip())
         if match:
+            claim = match.group(2)
             out.append({
                 "kind": match.group(1),
-                "claim": match.group(2),
+                "claim": claim,
                 "evidence": [int(value) for value in match.group(3).split(", ")],
                 "scope": match.group(4) or "project",
                 "condition": match.group(5) or "",
+                "claim_id": match.group(6) or capability_id_from_claim(claim),
+                "supersedes": parse_capability_refs(match.group(7)),
+                "contradicts": parse_capability_refs(match.group(8)),
+                "confirmed": match.group(9) or "",
+                "retracted": match.group(10) or "",
+                "retraction_reason": match.group(11) or "",
             })
     return out
 
@@ -328,8 +349,8 @@ def parse_frontmatter(path):
     return meta
 
 
-def load_concepts():
-    directory = concepts_dir()
+def load_concepts(directory=None):
+    directory = Path(directory) if directory is not None else concepts_dir()
     if not directory.is_dir():
         return []
     concepts = []
@@ -341,12 +362,14 @@ def load_concepts():
         if state not in STATES:
             state = "unknown"
         projects = meta.get("projects")
+        aliases = meta.get("aliases")
         concepts.append(
             {
                 "id": meta.get("id", path.stem),
                 "state": state,
                 "domain": meta.get("domain", "general"),
                 "projects": projects if isinstance(projects, list) else [],
+                "aliases": aliases if isinstance(aliases, list) else [],
                 "last-updated": meta.get("last-updated"),
                 "observations": meta.get("_evidence-count", 0),
                 "gap": meta.get("_gap", ""),
@@ -560,12 +583,18 @@ def select_knowledge(concepts, cwd):
     for concept in concepts:
         relevant = is_relevant(concept, cwd)
         for claim in concept.get("knowledge", ()):
+            if claim.get("retracted"):
+                continue
             scope = claim.get("scope", "project")
             if scope == "project" and not relevant:
                 continue
             if scope == "domain" and concept["domain"] not in relevant_domains:
                 continue
-            out.append({**claim, "id": concept["id"], "relevant": relevant})
+            claim_id = claim.get("claim_id") or capability_id_from_claim(claim["claim"])
+            out.append({**claim, "claim_id": claim_id, "id": concept["id"],
+                        "ref": f"{concept['id']}/{claim_id}", "relevant": relevant})
+    superseded = {ref for claim in out for ref in claim.get("supersedes", ())}
+    out = [claim for claim in out if claim["ref"] not in superseded]
     out.sort(key=lambda item: (
         not item["relevant"], kind_rank.get(item["kind"], 9), item["id"], item["claim"]
     ))
@@ -581,7 +610,11 @@ def render_knowledge(claims):
     for claim in claims:
         text = truncate(claim["claim"], KNOWLEDGE_CHARS)
         condition = f"; when {claim['condition']}" if claim.get("condition") else ""
-        entry = f"- {claim['id']} [{claim['kind']}, {claim['scope']}]: {text}{condition}"
+        relations = f"; contradicts {', '.join(claim['contradicts'])}" \
+            if claim.get("contradicts") else ""
+        ref = claim.get("ref") or claim.get("id", "claim")
+        entry = f"- {ref} [{claim['kind']}, {claim['scope']}]: " \
+                f"{text}{condition}{relations}"
         if shown >= KNOWLEDGE_LIMIT or spent + len(entry) > KNOWLEDGE_BUDGET:
             continue
         lines.append(entry)
@@ -613,6 +646,21 @@ def select_capability_candidates(concepts, cwd):
     return sorted(candidates, key=lambda item: (item["id"], item["index"]))
 
 
+def select_knowledge_candidates(concepts, cwd=None):
+    """Strong direct observations not yet cited by any semantic assertion."""
+    candidates = []
+    for concept in concepts:
+        if cwd is not None and not is_relevant(concept, cwd):
+            continue
+        covered = {number for claim in concept.get("knowledge", ())
+                   for number in claim.get("evidence", ())}
+        for evidence in concept.get("strong_evidence", ()):
+            if evidence.get("basis", "direct") != "inference" \
+                    and evidence["index"] not in covered:
+                candidates.append({**evidence, "id": concept["id"]})
+    return sorted(candidates, key=lambda item: (item["id"], item["index"]))
+
+
 def render_capability_candidates(candidates):
     if not candidates:
         return ""
@@ -628,7 +676,7 @@ def render_capability_candidates(candidates):
     return "\n".join(lines)
 
 
-def render(concepts, cwd=None, today=None):
+def render(concepts, cwd=None, today=None, include_knowledge=True):
     if not concepts:
         return (
             "No concepts recorded yet. The model is empty: assume nothing about what "
@@ -681,7 +729,7 @@ def render(concepts, cwd=None, today=None):
             lines.append(f"- {state}: {summarize(entries)}")
     return ("\n".join(lines)
             + render_capabilities(select_capabilities(surviving, cwd, today))
-            + render_knowledge(select_knowledge(surviving, cwd))
+            + (render_knowledge(select_knowledge(surviving, cwd)) if include_knowledge else "")
             + render_gaps(select_gaps(surviving, cwd))
             + render_capability_candidates(select_capability_candidates(surviving, cwd)))
 
@@ -781,7 +829,7 @@ def render_router(concepts, cwd=None, today=None):
     return "\n".join(lines) + render_gaps(strong_gaps), current
 
 
-def render_hierarchy(concepts, cwd=None, today=None):
+def render_hierarchy(concepts, cwd=None, today=None, include_knowledge=True):
     """Always-small router plus the complete leaf for the most specific active project."""
     if not concepts:
         return render([])
@@ -789,16 +837,34 @@ def render_hierarchy(concepts, cwd=None, today=None):
     if not current:
         return router
     local = project_concepts(concepts, current)
-    leaf = render(local, cwd=current, today=today)
+    leaf = render(local, cwd=current, today=today, include_knowledge=include_knowledge)
     return f"{router}\n\n## Active project knowledge\n\n{leaf}"
 
 
-def route_tokens(text):
-    """Stable lexical features for zero-service, privacy-preserving prompt routing."""
-    return {
-        token for token in re.findall(r"[a-z0-9]+", (text or "").lower())
+def route_token_list(text):
+    """route_tokens in source order, for callers that render tokens back as text."""
+    folded = (text or "").lower()
+    for ligature, expansion in ROUTE_LIGATURES.items():
+        folded = folded.replace(ligature, expansion)
+    folded = unicodedata.normalize("NFKD", folded)
+    folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    return [
+        token for token in re.findall(r"[a-z0-9]+", folded)
         if len(token) >= 3 and token not in ROUTE_STOPWORDS
-    }
+    ]
+
+
+def route_tokens(text):
+    """Stable lexical features for zero-service, privacy-preserving prompt routing.
+
+    Accents are folded before splitting. The token pattern is ASCII, so an accented word
+    would otherwise be shredded at each accent rather than merely spelled differently --
+    'securite' is a token, but 'sécurité' yields 'curit'. Since the lint restricts aliases
+    to [a-z0-9-], no alias could ever match those fragments, which made every accented
+    prompt unroutable. Folding here keeps prompt and vocabulary on the same footing: both
+    sides of the intersection run through this function.
+    """
+    return set(route_token_list(text))
 
 
 def select_prompt_domains(concepts, prompt, limit=PROMPT_DOMAIN_LIMIT):
@@ -814,6 +880,8 @@ def select_prompt_domains(concepts, prompt, limit=PROMPT_DOMAIN_LIMIT):
     by_domain = defaultdict(set)
     for concept in concepts:
         by_domain[concept["domain"]].update(route_tokens(concept["id"]))
+        for alias in concept.get("aliases", ()):
+            by_domain[concept["domain"]].update(route_tokens(alias))
         by_domain[concept["domain"]].update(route_tokens(concept["domain"]))
     ranked = []
     for domain, vocabulary in by_domain.items():
@@ -826,7 +894,8 @@ def select_prompt_domains(concepts, prompt, limit=PROMPT_DOMAIN_LIMIT):
     return [domain for _, domain in sorted(ranked, key=lambda item: (-item[0], item[1]))[:limit]]
 
 
-def render_prompt_routes(concepts, prompt, today=None, budget=PROMPT_ROUTE_BUDGET):
+def render_prompt_routes(concepts, prompt, today=None, budget=PROMPT_ROUTE_BUDGET,
+                         include_knowledge=True):
     """Render bounded domain leaves selected for one user prompt."""
     domains = select_prompt_domains(concepts, prompt)
     if not domains:
@@ -839,7 +908,7 @@ def render_prompt_routes(concepts, prompt, today=None, budget=PROMPT_ROUTE_BUDGE
     )
     out = header
     for domain in domains:
-        block = render_domain_index(domain, concepts, today.isoformat())
+        block = render_domain_index(domain, concepts, today.isoformat(), include_knowledge)
         remaining = budget - len(out)
         if remaining <= 0:
             break
@@ -886,13 +955,13 @@ def render_index_file(concepts, today):
     return "\n".join(header + body)
 
 
-def render_domain_index(domain, concepts, today):
+def render_domain_index(domain, concepts, today, include_knowledge=True):
     today_date = today if isinstance(today, date) else date.fromisoformat(today)
     entries = [concept for concept in concepts if concept["domain"] == domain]
     return (
         f"# Laconic domain — {domain}\n\n"
         f"*Generated {today}; {len(entries)} concepts. Do not hand-edit.*\n\n"
-        + render(entries, today=today_date) + "\n"
+        + render(entries, today=today_date, include_knowledge=include_knowledge) + "\n"
     )
 
 
@@ -999,6 +1068,8 @@ def main():
         default=None,
         help="render bounded domain leaves relevant to this prompt",
     )
+    ap.add_argument("--holdback-knowledge", action="store_true",
+                    help="omit semantic claims for an opt-in experiment arm")
     args = ap.parse_args()
 
     if args.ensure_bin:
@@ -1007,7 +1078,8 @@ def main():
         return 0
 
     if args.prompt is not None:
-        print(render_prompt_routes(load_concepts(), args.prompt, today=date.today()))
+        print(render_prompt_routes(load_concepts(), args.prompt, today=date.today(),
+                                   include_knowledge=not args.holdback_knowledge))
     elif args.write_index:
         path = write_index_file(date.today().isoformat())
         print(f"wrote {path}")
@@ -1017,7 +1089,8 @@ def main():
         # Failures are swallowed inside ensure_bin -- the injection must never break.
         ensure_bin()
         ensure_hierarchical_indexes()
-        print(render_hierarchy(load_concepts(), cwd=args.cwd, today=date.today()))
+        print(render_hierarchy(load_concepts(), cwd=args.cwd, today=date.today(),
+                               include_knowledge=not args.holdback_knowledge))
 
 
 if __name__ == "__main__":

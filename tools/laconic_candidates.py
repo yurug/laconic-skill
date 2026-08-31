@@ -6,7 +6,7 @@ import os
 import shlex
 from pathlib import Path
 
-from laconic_index import load_concepts, select_capability_candidates
+from laconic_index import load_concepts, select_capability_candidates, select_knowledge_candidates
 
 
 def main():
@@ -14,24 +14,33 @@ def main():
         description="show relevant strong evidence awaiting capability distillation"
     )
     parser.add_argument("--cwd", default=os.getcwd(), help="project used for relevance")
+    parser.add_argument("--knowledge", action="store_true",
+                        help="show strong evidence not cited by semantic knowledge")
     args = parser.parse_args()
 
-    candidates = select_capability_candidates(load_concepts(), str(Path(args.cwd).resolve()))
+    selector = select_knowledge_candidates if args.knowledge else select_capability_candidates
+    candidates = selector(load_concepts(), str(Path(args.cwd).resolve()))
     if not candidates:
         print("No undistilled strong evidence is relevant to this project.")
         return 0
 
-    print("Capability candidates (evidence is not a capability claim):")
+    if args.knowledge:
+        print("Semantic candidates (evidence is not yet a knowledge claim):")
+    else:
+        print("Capability candidates (evidence is not a capability claim):")
     for item in candidates:
         concept = shlex.quote(item["id"])
         print(f"\n{item['id']} evidence #{item['index']} "
               f"[{item['kind']}, {item.get('basis', 'direct')}, {item['date']}]")
         print(f"  {item['text']}")
-        print(
-            "  distil: ~/.laconic/bin/laconic-record "
-            f"{concept} --capability-from {item['index']} "
-            '--capability "<narrow reusable ability demonstrated by this evidence>"'
-        )
+        if args.knowledge:
+            print("  distil: ~/.laconic/bin/laconic-record "
+                  f"{concept} --claim-from {item['index']} "
+                  '--claim-kind <kind> --claim "<narrow proposition supported>"')
+        else:
+            print("  distil: ~/.laconic/bin/laconic-record "
+                  f"{concept} --capability-from {item['index']} "
+                  '--capability "<narrow reusable ability demonstrated by this evidence>"')
     return 0
 
 

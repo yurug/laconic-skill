@@ -37,6 +37,7 @@ from laconic_index import (  # noqa: E402
     ESTABLISHED_KNOWLEDGE,
     KNOWLEDGE_KINDS,
     KNOWLEDGE_SCOPES,
+    KNOWLEDGE_EXTENDED_RE,
     NOT_ESTABLISHED,
     SUMMARY_AFTER,
     UNDERSTANDS,
@@ -45,6 +46,7 @@ from laconic_index import (  # noqa: E402
     get_section,
     heading_re,
     load_concepts,
+    route_token_list,
     write_index_file,
 )
 
@@ -57,6 +59,9 @@ LOCK_WAIT_SECONDS = float(os.environ.get("LACONIC_LOCK_WAIT") or 15)
 STATES = ["unknown", "exposed", "familiar", "verified"]
 RANK = {s: i for i, s in enumerate(STATES)}
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+# The lint rejects anything else, so fold to this shape rather than
+# recording an alias that will be reported as an error on the next turn.
+ALIAS_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 LEADING_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}:?\s+")
 
 # Evidence kinds, after Naur's three criteria for possessing the theory of a program
@@ -119,6 +124,43 @@ def merge_project(meta):
         items.append(proj)
     if items:
         meta["projects"] = "[" + ", ".join(items) + "]"
+
+
+def merge_aliases(meta, new_aliases):
+    """Union routing aliases into the concept's `aliases` list, without duplicates.
+
+    Written as the '[a, b]' inline form: that is the only shape the index parses as a
+    list, and a bare scalar is silently dropped by the router rather than rejected.
+    Aliases containing commas are not supported and are refused before we get here.
+    """
+    raw = meta.get("aliases", "")
+    items = []
+    if raw.startswith("[") and raw.endswith("]"):
+        items = [a.strip() for a in raw[1:-1].split(",") if a.strip()]
+    seen = set(items)
+    for alias in new_aliases:
+        if alias not in seen:
+            items.append(alias)
+            seen.add(alias)
+    if items:
+        meta["aliases"] = "[" + ", ".join(items) + "]"
+
+
+def normalise_alias(alias):
+    """Fold an alias to the form the lint accepts, or return None with a reason.
+
+    Callers pass surface terms as they occur in prompts ('PSE', 'compétence'), so folding
+    belongs here rather than in the caller's head. The check that survives folding is
+    routability: route_tokens drops anything under three characters, so a two-letter alias
+    like 'PV' would be recorded and then never match anything.
+    """
+    folded = "-".join(route_token_list(alias))
+    if not folded:
+        return None, (f"'{alias}' contributes no routable token "
+                      "(under 3 characters, or a stopword)")
+    if not ALIAS_RE.fullmatch(folded):
+        return None, f"'{alias}' does not fold to a valid alias (got '{folded}')"
+    return folded, None
 
 
 def git_commit(home_dir, message):
@@ -503,16 +545,38 @@ def add_capability(body, kind, claim, today, scope="project", condition="",
     return set_section(body, CAPABILITIES, "\n".join(lines))
 
 
-def add_knowledge_claim(body, kind, claim, evidence_numbers, scope="project", condition=""):
+def format_knowledge_claim(item):
+    sources = ", ".join(str(number) for number in item["evidence"])
+    line = (f"- [{item['kind']}] {item['claim']} (evidence: {sources}) "
+            f"[scope: {item.get('scope', 'project')}]")
+    for key, label in (("condition", "when"), ("claim_id", "id"),
+                       ("supersedes", "supersedes"), ("contradicts", "contradicts"),
+                       ("confirmed", "confirmed"), ("retracted", "retracted"),
+                       ("retraction_reason", "retraction-reason")):
+        value = item.get(key)
+        if isinstance(value, (list, tuple)):
+            value = ", ".join(value)
+        if value:
+            line += f" [{label}: {value}]"
+    return line
+
+
+def add_knowledge_claim(body, kind, claim, evidence_numbers, scope="project", condition="",
+                        claim_id=None, supersedes=(), contradicts=()):
     """Append a semantic claim whose provenance is exact and mechanically checkable."""
     claim = " ".join(claim.split())
-    sources = ", ".join(str(number) for number in evidence_numbers)
-    condition_suffix = f" [when: {condition}]" if condition else ""
-    line = f"- [{kind}] {claim} (evidence: {sources}) [scope: {scope}]{condition_suffix}"
+    claim_id = claim_id or capability_id_from_claim(claim)
+    line = format_knowledge_claim({
+        "kind": kind, "claim": claim, "evidence": evidence_numbers, "scope": scope,
+        "condition": condition, "claim_id": claim_id, "supersedes": supersedes,
+        "contradicts": contradicts,
+    })
     current = get_section(body, ESTABLISHED_KNOWLEDGE)
     lines = current.splitlines() if current else []
-    prefix = f"- [{kind}] {claim} (evidence: "
-    lines = [existing for existing in lines if not existing.startswith(prefix)]
+    lines = [existing for existing in lines if not (
+        (match := KNOWLEDGE_EXTENDED_RE.fullmatch(existing.strip()))
+        and (match.group(6) or capability_id_from_claim(match.group(2))) == claim_id
+    )]
     lines.append(line)
     return set_section(body, ESTABLISHED_KNOWLEDGE, "\n".join(lines))
 
@@ -559,7 +623,7 @@ def retract_capability(concept_id, capability_id, reason, today):
 def render(meta, evidence, body):
     order = [
         "id", "type", "domain", "projects", "state", "confidence",
-        "depends-on", "last-updated",
+        "aliases", "depends-on", "last-updated",
     ]
     lines = ["---"]
     for key in order:
@@ -630,6 +694,13 @@ def main():
     ap.add_argument("--domain", default=None)
     ap.add_argument("--confidence", type=float, default=None)
     ap.add_argument("--depends-on", default=None, help="comma-separated concept ids")
+    ap.add_argument(
+        "--alias", action="append", default=None, metavar="TERM",
+        help="surface term that should route to this concept's domain (repeatable); "
+             "folded to lowercase ASCII, so --alias 'compétence' records 'competence'. "
+             "Use it when the user's own wording for a subject shares no word with the "
+             "concept id -- a French term for an English id, or an acronym",
+    )
     ap.add_argument("--summary", default=None, help="one line on what the concept is (new files only)")
     ap.add_argument(
         "--understands",
@@ -660,6 +731,18 @@ def main():
     )
     ap.add_argument("--date", default=None, help="ISO date; defaults to today")
     args = ap.parse_args()
+
+    # Fold here rather than in apply_record: args is what gets spooled when the lock is
+    # contended, so a rejected alias must be rejected now, at the user's terminal, not
+    # silently at drain time.
+    folded_aliases = []
+    for raw_alias in args.alias or []:
+        folded, problem = normalise_alias(raw_alias)
+        if problem:
+            ap.error(f"--alias {problem}")
+        if folded not in folded_aliases:
+            folded_aliases.append(folded)
+    args.alias = folded_aliases
 
     if args.confirmed and args.basis not in (None, "confirmation"):
         ap.error("--confirmed conflicts with --basis direct or inference")
@@ -763,8 +846,9 @@ def main():
     distil_only = args.forget is None and args.evidence is None
     if (distil_only and args.understands is None and args.not_established is None
             and args.capability is None and args.claim is None
-            and args.retract_capability is None):
-        ap.error("--evidence is required unless you pass --understands or --not-established")
+            and args.retract_capability is None and not args.alias):
+        ap.error("--evidence is required unless you pass --understands, --not-established "
+                 "or --alias")
     if (args.state is None and args.basis != "inference" and not distil_only and args.forget is None
             and args.retract_capability is None):
         ap.error("--state is required for direct or confirmed observations")
@@ -806,21 +890,22 @@ def main():
         ap.error("capability metadata and relations require --capability")
 
     if args.claim is not None:
-        if args.evidence is not None:
-            ap.error("--claim distils existing evidence; it cannot be combined with --evidence")
-        if args.claim_from is None:
-            ap.error("--claim requires --claim-from")
+        if args.evidence is not None and args.claim_from is not None:
+            ap.error("--claim-from cannot be combined with new --evidence")
+        if args.evidence is None and args.claim_from is None:
+            ap.error("--claim requires new --evidence or --claim-from")
         if not args.claim.strip() or any(char in args.claim for char in ("\n", "\r", "]")):
             ap.error("--claim must be one non-empty line without ']'")
         if args.claim_condition is not None and (
                 not args.claim_condition.strip() or "]" in args.claim_condition):
             ap.error("--claim-condition must be non-empty and cannot contain ']'")
-        try:
-            claim_sources = [int(value.strip()) for value in args.claim_from.split(",")]
-        except (TypeError, ValueError):
-            ap.error("--claim-from expects comma-separated one-based evidence numbers")
-        if any(number < 1 for number in claim_sources) or len(set(claim_sources)) != len(claim_sources):
-            ap.error("--claim-from expects unique one-based evidence numbers")
+        if args.claim_from is not None:
+            try:
+                claim_sources = [int(value.strip()) for value in args.claim_from.split(",")]
+            except (TypeError, ValueError):
+                ap.error("--claim-from expects comma-separated one-based evidence numbers")
+            if any(number < 1 for number in claim_sources) or len(set(claim_sources)) != len(claim_sources):
+                ap.error("--claim-from expects unique one-based evidence numbers")
     elif (args.claim_from is not None or args.claim_kind != "understanding"
           or args.claim_scope != "project" or args.claim_condition is not None):
         ap.error("claim metadata requires --claim")
@@ -965,6 +1050,23 @@ def apply_record(args, today, quiet=False):
         source_marker = f"[sources: {', '.join(source_refs)}] " if source_refs else ""
         evidence_text = f"[{args.kind}] {basis_marker}{source_marker}{evidence_text}"
 
+    # A call that adds nothing but routing words asserts nothing about the user, so it must
+    # leave every observational field alone -- not just state and last-updated.
+    alias_only = bool(distil_only and getattr(args, "alias", None)
+                      and args.understands is None and args.not_established is None
+                      and getattr(args, "capability", None) is None
+                      and getattr(args, "claim", None) is None
+                      and args.domain is None and args.confidence is None
+                      and args.depends_on is None and args.summary is None)
+
+    # An alias is vocabulary pointing at a concept; on its own it asserts nothing that
+    # would justify bringing a concept into existence. Creating one here would add a
+    # stateless, evidence-free file to the model just because a word was mentioned.
+    if not path.exists() and getattr(args, "alias", None) and distil_only:
+        print(f"error: {args.concept_id} does not exist — --alias cannot create a concept",
+              file=sys.stderr)
+        return 2
+
     if path.exists():
         meta, evidence, body = parse_existing(path)
         if meta is None:
@@ -1027,7 +1129,11 @@ def apply_record(args, today, quiet=False):
 
     meta["id"] = args.concept_id
     meta.setdefault("type", "concept")
-    merge_project(meta)
+    # `projects` says where the user was observed, and it decides which concepts the index
+    # inlines for the active project. Adding a routing word proves nothing about where the
+    # concept was observed, so a call that only does that must not claim the current repo.
+    if not alias_only:
+        merge_project(meta)
     if args.domain:
         meta["domain"] = args.domain
     meta.setdefault("domain", "general")
@@ -1044,6 +1150,12 @@ def apply_record(args, today, quiet=False):
     if args.depends_on:
         if deps:
             meta["depends-on"] = "[" + ", ".join(deps) + "]"
+    # Aliases are routing vocabulary, not an observation, so they carry no state and do
+    # not touch last-updated: adding one changes which prompts load the concept, never
+    # what the model claims the user knows.
+    new_aliases = getattr(args, "alias", None) or []
+    if new_aliases:
+        merge_aliases(meta, new_aliases)
     if not distil_only:
         meta["last-updated"] = today
     meta.setdefault("last-updated", today)
@@ -1059,6 +1171,8 @@ def apply_record(args, today, quiet=False):
     if args.not_established is not None:
         body = set_section(body, NOT_ESTABLISHED, args.not_established)
     if knowledge_claim is not None:
+        if not claim_sources and evidence_text is not None:
+            claim_sources = [len(evidence)]
         missing_sources = [number for number in claim_sources if number > len(evidence)]
         if missing_sources:
             print(
@@ -1186,6 +1300,10 @@ def apply_record(args, today, quiet=False):
     print(f"{action} {path.name}: {prior} -> {final} ({len(evidence)} observations)")
     if note:
         print(note)
+    # Report the folded form, not what was typed: 'compétence' is recorded as 'competence',
+    # and a caller who cannot see that will add the same alias again in a different spelling.
+    if new_aliases:
+        print(f"  routing aliases now: {meta.get('aliases', '[]')}")
     # Creation now requires --domain, so reaching `general` means a file predating that rule
     # or one rebuilt from unparseable frontmatter. Either way it is fixable in place.
     if meta.get("domain", "general") == "general":

@@ -37,21 +37,32 @@ fi
 # (e.g. echo '{}' | ...) or stdin will block on the terminal.
 INPUT="$(cat 2>/dev/null || true)"
 SESSION_CWD=""
+SESSION_ID=""
 if [ -n "$INPUT" ] && command -v python3 >/dev/null 2>&1; then
-  SESSION_CWD="$(printf '%s' "$INPUT" | python3 -c '
+  read -r SESSION_CWD SESSION_ID <<<"$(printf '%s' "$INPUT" | python3 -c '
 import json, sys
 try:
-    print(json.load(sys.stdin).get("cwd", ""))
+    d=json.load(sys.stdin); print(d.get("cwd", "-") or "-", d.get("session_id", "-") or "-")
 except Exception:
-    print("")
-' 2>/dev/null)" || SESSION_CWD=""
+    print("- -")
+' 2>/dev/null)" || true
+  [ "$SESSION_CWD" = "-" ] && SESSION_CWD=""
+  [ "$SESSION_ID" = "-" ] && SESSION_ID=""
+fi
+
+HOLDBACK=""
+if [ "${LACONIC_TELEMETRY:-}" = "1" ] && [ "${LACONIC_EXPERIMENT:-}" = "1" ] \
+    && [ -n "$SESSION_ID" ]; then
+  ARM="$(PYTHONPATH="${PLUGIN_ROOT}/tools" python3 -c \
+    'from laconic_experiment import arm; import sys; print(arm(sys.argv[1]))' "$SESSION_ID" 2>/dev/null)" || ARM="semantic"
+  [ "$ARM" = "holdback" ] && HOLDBACK="--holdback-knowledge"
 fi
 
 if command -v python3 >/dev/null 2>&1 && [ -f "$INDEX_SCRIPT" ]; then
   if [ -n "$SESSION_CWD" ]; then
-    INDEX="$(python3 "$INDEX_SCRIPT" --cwd "$SESSION_CWD" 2>/dev/null)" || INDEX=""
+    INDEX="$(python3 "$INDEX_SCRIPT" --cwd "$SESSION_CWD" $HOLDBACK 2>/dev/null)" || INDEX=""
   else
-    INDEX="$(python3 "$INDEX_SCRIPT" 2>/dev/null)" || INDEX=""
+    INDEX="$(python3 "$INDEX_SCRIPT" $HOLDBACK 2>/dev/null)" || INDEX=""
   fi
 else
   INDEX=""
@@ -116,9 +127,10 @@ else
   is weak and audit-only (no state/capability).
   Never infer prerequisites or invent observations. Strong --kind values are
   world, justification, or modification. If one proves a reusable ability, add --capability.
-  Review capability candidates yourself. Distil clear older proof with --capability-from;
-  never duplicate evidence. Leave ambiguity silently. Scope defaults to this project; widen
-  it only with transfer evidence.
+  Distil clear older proof with --capability-from; never duplicate evidence. Scope defaults
+  to this project; widen only with transfer evidence. If evidence supports a durable
+  understanding/principle/constraint/preference, add --claim and --claim-kind; use
+  --claim-from for old evidence. Skip ambiguity.
   Record relations only when observed; retract obsolete abilities
   with --retract-capability and --reason. The default, term use, is weakest. A facet question becomes a gap via
   --not-established, not a whole-concept demotion. When the tool asks, distil with only

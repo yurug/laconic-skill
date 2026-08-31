@@ -44,6 +44,7 @@ type: concept
 domain: consensus
 state: verified | familiar | exposed | unknown
 confidence: 0.0-1.0
+aliases: [finalite, irreversibilite]
 evidence:
   - 2026-07-20: used the term unprompted while correcting my summary
 depends-on: [consensus-tenderbake]
@@ -129,6 +130,35 @@ by default; widen it only when the cited evidence supports transfer. Every claim
 one or more exact evidence numbers. Inferred evidence cannot establish a claim. Use
 `--claim-condition` for a condition that bounds applicability. A legacy file without the
 section remains valid.
+
+Claims receive stable ids. The local console can confirm, reformulate, rescope, condition, or
+retract one claim while preserving its exact evidence. `supersedes` removes an older active
+claim; `contradicts` keeps both visible. Use `laconic-candidates --knowledge` to inspect strong
+observations not cited by any claim. Do not manufacture prose merely to empty that queue.
+
+## Routing aliases
+
+The prompt router's vocabulary is domain names, concept ids, and aliases — nothing else.
+When the user's own word for a subject shares no token with the concept id, the domain is
+unreachable no matter how well modeled it is: a French prompt about a redundancy plan never
+selects `droit-social`. Record the surface term instead of renaming the concept:
+
+```bash
+laconic-record drieets-homologation-control --alias PSE --alias "compétence"
+```
+
+Aliases are vocabulary, not evidence. The call therefore takes no `--state`, leaves
+`last-updated`, `confidence`, and `projects` untouched, and cannot create a concept.
+Terms are folded to what the lint accepts, so `compétence` is stored as `competence` and
+the tool prints the stored form back. A term under three characters or on the stopword
+list is refused rather than silently recorded: it could never match.
+
+Add an alias from an observed miss — the user used that word and the domain did not load —
+not from imagination. Prefer terms that are unambiguous in the user's usage: a word that
+also occurs in unrelated prompts pulls the wrong domain into every one of them. Inflected
+forms are separate aliases; matching is exact, so `licenciement` does not match
+`licenciements`. `laconic-stats --routing` reports repeatedly missed domains, which is the
+evidence this list should grow from.
 
 ## The two prose sections
 

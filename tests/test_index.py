@@ -36,7 +36,8 @@ class TestAtomicWrite(unittest.TestCase):
 
 
 def concept(cid, state="exposed", domain="testing", observations=1, gap="", projects=(),
-            last_updated="2026-07-28", capabilities=(), strong_evidence=(), knowledge=()):
+            last_updated="2026-07-28", capabilities=(), strong_evidence=(), knowledge=(),
+            aliases=()):
     return {
         "id": cid,
         "state": state,
@@ -44,6 +45,7 @@ def concept(cid, state="exposed", domain="testing", observations=1, gap="", proj
         "observations": observations,
         "gap": gap,
         "projects": list(projects),
+        "aliases": list(aliases),
         "last-updated": last_updated,
         "capabilities": list(capabilities),
         "knowledge": list(knowledge),
@@ -52,17 +54,23 @@ def concept(cid, state="exposed", domain="testing", observations=1, gap="", proj
 
 
 class TestEstablishedKnowledge(unittest.TestCase):
+    def knowledge(self, claim, claim_id, **extra):
+        return {"kind": "principle", "claim": claim, "claim_id": claim_id,
+                "evidence": [1], "scope": "general", "condition": "",
+                "supersedes": [], "contradicts": [], "retracted": "", **extra}
+
     def test_parses_sourced_claims_and_defaults_to_project_scope(self):
         body = """## Established knowledge
 - [understanding] Explains why the cache is bounded (evidence: 1, 3)
 - [constraint] Requires offline operation (evidence: 2) [scope: general] [when: travelling]
 """
-        self.assertEqual(L.parse_knowledge_claims(body), [
-            {"kind": "understanding", "claim": "Explains why the cache is bounded",
-             "evidence": [1, 3], "scope": "project", "condition": ""},
-            {"kind": "constraint", "claim": "Requires offline operation",
-             "evidence": [2], "scope": "general", "condition": "travelling"},
+        parsed = L.parse_knowledge_claims(body)
+        self.assertEqual([(item["kind"], item["claim"], item["evidence"], item["scope"],
+                           item["condition"]) for item in parsed], [
+            ("understanding", "Explains why the cache is bounded", [1, 3], "project", ""),
+            ("constraint", "Requires offline operation", [2], "general", "travelling"),
         ])
+        self.assertTrue(all(item["claim_id"] for item in parsed))
 
     def test_legacy_body_without_v2_section_is_unchanged(self):
         self.assertEqual(L.parse_knowledge_claims("## What has not been established\nA gap"), [])
@@ -101,6 +109,24 @@ class TestEstablishedKnowledge(unittest.TestCase):
         )
         selected = L.select_knowledge([concept("one", domain="systems", knowledge=claims)], None)
         self.assertEqual({item["scope"] for item in selected}, {"domain", "general"})
+
+    def test_retracted_and_superseded_claims_leave_injection(self):
+        old = self.knowledge("Old rule", "old")
+        gone = self.knowledge("Wrong rule", "wrong", retracted="2026-08-05")
+        new = self.knowledge("New rule", "new", supersedes=["one/old"])
+        selected = L.select_knowledge([concept("one", knowledge=[old, gone, new])], None)
+        self.assertEqual([item["claim"] for item in selected], ["New rule"])
+
+    def test_semantic_candidates_are_exactly_uncited_strong_evidence(self):
+        strong = [
+            {"index": 1, "date": "2026-08-05", "kind": "world", "basis": "direct", "text": "a"},
+            {"index": 2, "date": "2026-08-05", "kind": "justification", "basis": "direct", "text": "b"},
+        ]
+        covered = self.knowledge("Cites first", "first", evidence=[1])
+        candidates = L.select_knowledge_candidates([
+            concept("one", knowledge=[covered], strong_evidence=strong)
+        ])
+        self.assertEqual([(item["id"], item["index"]) for item in candidates], [("one", 2)])
 
 
 class TestDecay(unittest.TestCase):
@@ -438,6 +464,33 @@ class TestRender(ModelTestCase):
             ["formal-verification"],
         )
 
+    def test_routing_folds_accents(self):
+        """The token pattern is ASCII, so without folding an accent splits the word into
+        fragments no alias can match: 'securite' is a token, 'sécurité' yields 'curit'."""
+        self.assertEqual(L.route_tokens("sécurité"), {"securite"})
+        self.assertEqual(L.route_tokens("compétence"), {"competence"})
+        self.assertEqual(L.route_tokens("réseau"), {"reseau"})
+
+    def test_routing_expands_ligatures_nfkd_leaves_alone(self):
+        self.assertEqual(L.route_tokens("mise en œuvre"), {"mise", "oeuvre"})
+
+    def test_accent_folding_is_symmetric(self):
+        """Prompt and vocabulary both run through route_tokens, so an accented prompt
+        matches an unaccented alias and the reverse."""
+        concepts = [concept("droit-social-pse", domain="droit-social",
+                            aliases=["licenciement"])]
+        self.assertEqual(
+            L.select_prompt_domains(concepts, "combien de licenciement gardons-nous?"),
+            ["droit-social"],
+        )
+
+    def test_aliases_widen_the_domain_vocabulary(self):
+        concepts = [concept("collective-redundancy-plan", domain="droit-social",
+                            aliases=["pse"])]
+        self.assertEqual(L.select_prompt_domains(concepts, "où en est le PSE?"),
+                         ["droit-social"])
+        self.assertEqual(L.select_prompt_domains(concepts, "où en est le dossier?"), [])
+
     def test_prompt_route_is_bounded(self):
         concepts = [concept(f"rocq-item-{i}", domain="formal-verification")
                     for i in range(100)]
@@ -547,7 +600,8 @@ class TestStableCommandPath(ModelTestCase):
                      "laconic-status", "laconic-stats", "laconic-candidates",
                      "laconic-bootstrap", "laconic-review", "laconic-review-web",
                      "laconic-apply-review", "laconic-maintenance",
-                     "laconic-route-observe", "laconic-reconcile"):
+                     "laconic-route-observe", "laconic-reconcile",
+                     "laconic-migrate-v2", "laconic-structure"):
             self.assertTrue((self.home / "bin" / name).exists(), name)
 
     def test_wrappers_are_executable(self):

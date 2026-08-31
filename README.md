@@ -45,6 +45,7 @@ depending on whether laconic is a plugin or a bare skill:
 ~/.laconic/bin/laconic-candidates # review strong evidence awaiting distillation
 ~/.laconic/bin/laconic-bootstrap  # prepare a consented transcript review bundle
 ~/.laconic/bin/laconic-migrate-v2 # reviewed migration to sourced semantic claims
+~/.laconic/bin/laconic-structure  # hash-bound domain/project/concept reconciliation
 ~/.laconic/bin/laconic-review     # validate and render agent proposals; never apply them
 ~/.laconic/bin/laconic-review-web # review proposals and persist accept/reject decisions
 ~/.laconic/bin/laconic-apply-review # apply explicitly accepted proposals after preflight
@@ -165,6 +166,15 @@ mentioned vocabulary from a selected domain. This is a usefulness proxy, not pro
 can matter without being named, and a name can appear without the context being useful.
 The same report lists domains whose vocabulary surfaced without having been selected. Treat
 repeated occurrences as alias/index candidates, not individual occurrences as proven misses.
+Act on a confirmed candidate with `laconic-record <concept> --alias <term>`: the router only
+knows domain names, concept ids, and aliases, so a subject you name in another language or by
+acronym is unreachable until one is recorded. Accents and ligatures are folded on both sides,
+so `sécurité` matches the alias `securite`.
+
+For a local causal comparison, explicitly enable both `LACONIC_TELEMETRY=1` and
+`LACONIC_EXPERIMENT=1`. A stable 20% of sessions omit semantic assertions (not the safety
+policy or concept states); `laconic-stats --experiment` compares answer length, redundant
+definitions, and later explicit-correction signals. No prompt or response text is retained.
 
 If you try it, tell me what broke: issues, pull requests, and a plain "this made no sense to
 me" are all welcome.

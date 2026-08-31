@@ -14,6 +14,8 @@ import re
 from datetime import date
 from pathlib import Path
 
+from laconic_experiment import arm as experiment_arm
+
 # A correction is a reaction, not a mention: the cue must open the message or a sentence,
 # and the bare negations must be punctuated as interjections ("No, ..." / "Non :"), so that
 # "there is no file" and a pasted "No such file or directory" line stay silent.
@@ -145,6 +147,7 @@ def begin_text(text, session_id):
             pending.parent.mkdir(parents=True, exist_ok=True)
             pending.write_text(json.dumps({
                 "date": date.today().isoformat(), "signal": reason,
+                "experiment_arm": experiment_arm(session_id),
             }) + "\n", encoding="utf-8")
         except OSError:
             pass

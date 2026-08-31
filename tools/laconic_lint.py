@@ -19,7 +19,7 @@ from laconic_index import (  # noqa: E402
     CAPABILITY_EXTENDED_RE,
     CAPABILITY_REF_RE,
     ESTABLISHED_KNOWLEDGE,
-    KNOWLEDGE_RE,
+    KNOWLEDGE_EXTENDED_RE,
     NOT_ESTABLISHED,
     STATES,
     SUMMARY_AFTER,
@@ -220,7 +220,7 @@ def check_concept(path, report, today):
         if line.strip()
     ]
     for line in knowledge_lines:
-        match = KNOWLEDGE_RE.fullmatch(line)
+        match = KNOWLEDGE_EXTENDED_RE.fullmatch(line)
         if not match:
             report.error(path, f"malformed established knowledge claim: {line[:60]}")
             continue
@@ -236,6 +236,19 @@ def check_concept(path, report, today):
                 )
             elif "[basis: inference]" in evidence[source_number - 1]:
                 report.error(path, "inferred evidence cannot establish knowledge")
+        confirmed, retracted, reason = match.group(9), match.group(10), match.group(11)
+        for label, value in (("confirmation", confirmed), ("retraction", retracted)):
+            if value:
+                try:
+                    parsed = date.fromisoformat(value)
+                    if parsed > today:
+                        report.error(path, f"knowledge {label} '{value}' is in the future")
+                except ValueError:
+                    report.error(path, f"knowledge {label} '{value}' is not a real date")
+        if retracted and not reason:
+            report.error(path, "retracted knowledge claim has no reason")
+        if reason and not retracted:
+            report.error(path, "knowledge claim has retraction reason but no date")
 
     # Credentials in a committed file. An error, not a warning: a configured remote could
     # sync it while someone decided what to do about it.
@@ -284,7 +297,17 @@ def check_concept(path, report, today):
 
 def check_graph(metas, report, paths_by_id):
     ids = set(metas)
+    aliases = {}
     for cid, meta in metas.items():
+        for alias in meta.get("aliases", []) or []:
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", alias):
+                report.error(paths_by_id[cid], f"invalid concept alias '{alias}'")
+            elif alias in ids:
+                report.error(paths_by_id[cid], f"alias '{alias}' collides with a concept id")
+            elif alias in aliases:
+                report.error(paths_by_id[cid], f"alias '{alias}' also belongs to '{aliases[alias]}'")
+            else:
+                aliases[alias] = cid
         for dep in meta.get("depends-on", []) or []:
             if dep not in ids:
                 report.error(paths_by_id[cid], f"depends-on '{dep}' does not exist")
@@ -363,6 +386,35 @@ def check_capability_graph(metas, report, paths_by_id):
             visit(ref, [])
 
 
+def check_knowledge_graph(metas, report, paths_by_id):
+    claims = {}
+    for concept_id, meta in metas.items():
+        local = set()
+        for claim in meta.get("_knowledge", ()):
+            claim_id = claim["claim_id"]
+            ref = f"{concept_id}/{claim_id}"
+            if claim_id in local:
+                report.error(paths_by_id[concept_id], f"duplicate knowledge claim id '{claim_id}'")
+            local.add(claim_id)
+            claims[ref] = (concept_id, claim)
+    for ref, (concept_id, claim) in claims.items():
+        targets = set()
+        for relation in ("supersedes", "contradicts"):
+            for target in claim.get(relation, ()):
+                if not CAPABILITY_REF_RE.fullmatch(target):
+                    report.error(paths_by_id[concept_id],
+                                 f"{relation} has invalid knowledge reference '{target}'")
+                elif target not in claims:
+                    report.error(paths_by_id[concept_id],
+                                 f"{relation} knowledge claim '{target}' does not exist")
+                if target == ref:
+                    report.error(paths_by_id[concept_id], f"knowledge claim '{ref}' {relation} itself")
+                if target in targets:
+                    report.error(paths_by_id[concept_id],
+                                 f"knowledge claim '{ref}' relates to '{target}' twice")
+                targets.add(target)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Validate the laconic knowledge model.")
     ap.add_argument(
@@ -397,6 +449,7 @@ def main():
 
     check_graph(metas, report, paths_by_id)
     check_capability_graph(metas, report, paths_by_id)
+    check_knowledge_graph(metas, report, paths_by_id)
 
     # Token discipline, made mechanical so it cannot regress unnoticed.
     os.environ["LACONIC_HOME"] = args.home

@@ -116,6 +116,13 @@ class TestPrivacyAndSafety(ObserveTestCase):
         raw = (self.home / "telemetry.jsonl").read_text(encoding="utf-8")
         self.assertNotIn(secret, raw, "response or prompt text reached the telemetry log")
 
+    def test_hashes_session_identity(self):
+        self.create("cognitive-load-theory", state="familiar", domain="cognitive-science")
+        transcript = self.transcript(("user", "q"), ("assistant", "cognitive load theory"))
+        self.observe(transcript, session="private-session-id")
+        raw = (self.home / "telemetry.jsonl").read_text()
+        self.assertNotIn("private-session-id", raw)
+
     def test_requires_explicit_opt_in(self):
         self.create("cognitive-load-theory", state="familiar", domain="cognitive-science")
         t = self.transcript(("user", "q"), ("assistant", "cognitive load theory"))

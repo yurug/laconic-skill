@@ -144,6 +144,16 @@ Three rules matter often enough to state here:
   durable understanding, principle, constraint, or preference, use `--claim`, `--claim-kind`,
   and `--claim-from <evidence-numbers>`. Keep the conservative project scope unless the cited
   evidence establishes broader transfer. Never source a claim from inferred evidence.
+  Review `laconic-candidates --knowledge` during reconciliation; every strong uncited item
+  must become one narrow sourced claim or remain deliberately unmodeled. Respect claim ids,
+  confirmation, retraction, `supersedes`, and `contradicts`; never revive inactive history by
+  restating it under a new id.
+- **Record a routing alias when the user's own word missed its domain.** The router matches
+  domain names, concept ids, and aliases only, so a subject the user names in another
+  language or by acronym stays unreachable however well it is modeled. Add the observed
+  surface term with `--alias`; it is vocabulary, not evidence, so it moves no state and
+  needs none. Add only unambiguous terms you saw miss — a word that also occurs in unrelated
+  prompts pulls the wrong domain into all of them.
 - **Maintain the model without assigning chores to the user.** Review capability candidates
   already present in the injected context, or run `~/.laconic/bin/laconic-candidates`
   yourself when deeper inspection is useful. Distil an existing candidate with

@@ -6,6 +6,7 @@ import unittest
 from unittest import mock
 
 from helpers import RECORD, TOOLS, ModelTestCase, requires_git
+import laconic_index
 import laconic_record
 
 
@@ -820,6 +821,16 @@ class TestEvidenceKinds(ModelTestCase):
 
 
 class TestEstablishedKnowledge(ModelTestCase):
+    def test_new_observation_can_atomically_establish_a_semantic_claim(self):
+        result = self.record(
+            "cache", "--state", "exposed", "--domain", "systems",
+            "--evidence", "required the cache to remain bounded",
+            "--claim", "Requires the cache to remain bounded", "--claim-kind", "constraint",
+        )
+        self.assertEqual(result.code, 0, result.text)
+        self.assertIn("(evidence: 1)", self.section("cache", "Established knowledge"))
+        self.assertEqual(self.lint("--quiet").code, 0)
+
     def test_distils_claim_from_multiple_existing_observations(self):
         self.create("thing", evidence="explained the bounded cache")
         self.record("thing", "--state", "familiar", "--evidence", "applied the same bound")
@@ -859,6 +870,17 @@ class TestEstablishedKnowledge(ModelTestCase):
         result = self.lint()
         self.assertEqual(result.code, 1, result.text)
         self.assertIn("knowledge source evidence #9 exceeds", result.text)
+
+    def test_lint_rejects_dangling_knowledge_relations(self):
+        self.create("thing", evidence="explained it")
+        self.record("thing", "--claim", "Understands it", "--claim-from", "1")
+        text = self.read("thing").replace(
+            "[id: understands-it]", "[id: understands-it] [supersedes: missing/claim]"
+        )
+        self.path("thing").write_text(text)
+        result = self.lint()
+        self.assertEqual(result.code, 1, result.text)
+        self.assertIn("does not exist", result.text)
 
 
 class TestCapabilities(ModelTestCase):
@@ -1179,6 +1201,91 @@ class TestCapabilities(ModelTestCase):
         r = self.record("thing", "--retract-capability", "anything")
         self.assertNotEqual(r.code, 0)
         self.assertIn("requires --reason", r.text)
+
+class TestRoutingAliases(ModelTestCase):
+    """`--alias` is the only sanctioned way to widen routing vocabulary: the schema field
+    exists and the index reads it, but a hand-written concept file is forbidden."""
+
+    def test_alias_is_recorded_as_an_inline_list(self):
+        self.create("droit-social-pse", domain="droit-social")
+        self.record("droit-social-pse", "--alias", "PSE", "--alias", "licenciement")
+        self.assertEqual(self.field("droit-social-pse", "aliases"), "[pse, licenciement]")
+
+    def test_alias_folds_accents_and_case(self):
+        """The lint accepts only [a-z0-9-], so an accented alias has to be folded rather
+        than refused -- the caller types the user's word, not the storage form."""
+        self.create("thing")
+        self.record("thing", "--alias", "Compétence")
+        self.assertEqual(self.field("thing", "aliases"), "[competence]")
+
+    def test_alias_is_idempotent_across_spellings(self):
+        self.create("thing")
+        self.record("thing", "--alias", "PSE")
+        self.record("thing", "--alias", "pse", "--alias", "CSE")
+        self.assertEqual(self.field("thing", "aliases"), "[pse, cse]")
+
+    def test_multiword_alias_keeps_source_order(self):
+        self.create("thing")
+        self.record("thing", "--alias", "plan de sauvegarde")
+        self.assertEqual(self.field("thing", "aliases"), "[plan-sauvegarde]")
+
+    def test_rejects_an_alias_that_cannot_route(self):
+        """Under three characters or a stopword, route_tokens drops it. Recording such an
+        alias would look like it worked and never match anything."""
+        self.create("thing")
+        for dead in ("PV", "pour", "!!"):
+            r = self.record("thing", "--alias", dead)
+            self.assertEqual(r.code, 2, f"{dead} should be rejected")
+            self.assertIn("no routable token", r.text)
+
+    def test_alias_alone_needs_no_evidence(self):
+        """Vocabulary is not an observation, so it must not force the caller to invent one."""
+        self.create("thing")
+        r = self.record("thing", "--alias", "truc")
+        self.assertEqual(r.code, 0, r.text)
+
+    def test_alias_does_not_move_state_or_last_updated(self):
+        self.create("thing", state="familiar")
+        before = (self.field("thing", "state"), self.field("thing", "last-updated"),
+                  self.field("thing", "confidence"))
+        self.record("thing", "--alias", "truc")
+        after = (self.field("thing", "state"), self.field("thing", "last-updated"),
+                 self.field("thing", "confidence"))
+        self.assertEqual(before, after)
+
+    def test_alias_does_not_claim_the_current_project(self):
+        """`projects` decides which concepts the index inlines for the active project.
+        Typing a routing word here is not an observation of the user in this repo."""
+        self.create("thing")
+        before = self.field("thing", "projects")
+        self.record("thing", "--alias", "truc")
+        self.assertEqual(self.field("thing", "projects"), before)
+
+    def test_alias_alongside_evidence_still_records_the_project(self):
+        """Only a bare alias call is exempt; a real observation attributes as usual."""
+        path = self.concepts / "other.md"
+        self.assertFalse(path.exists())
+        self.record("other", "--state", "exposed", "--domain", "d",
+                    "--evidence", "saw it", "--alias", "truc")
+        self.assertIsNotNone(self.field("other", "projects"))
+        self.assertEqual(self.field("other", "aliases"), "[truc]")
+
+    def test_alias_cannot_create_a_concept(self):
+        r = self.record("no-such-concept", "--alias", "truc")
+        self.assertEqual(r.code, 2)
+        self.assertIn("does not exist", r.text)
+
+    def test_alias_routes_the_prompt_to_the_domain(self):
+        """The contract that matters: the alias reaches select_prompt_domains."""
+        self.create("droit-social-pse", domain="droit-social")
+        self.assertEqual(laconic_record.load_concepts(self.concepts)[0]["aliases"], [])
+        self.record("droit-social-pse", "--alias", "PSE")
+        concepts = laconic_record.load_concepts(self.concepts)
+        self.assertEqual(
+            laconic_index.select_prompt_domains(concepts, "où en est le PSE?"),
+            ["droit-social"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

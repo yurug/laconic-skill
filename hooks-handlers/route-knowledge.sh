@@ -31,7 +31,6 @@ spec = importlib.util.spec_from_file_location("laconic_index", sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 concepts = module.load_concepts()
-context = module.render_prompt_routes(concepts, prompt)
 tools_dir = Path(sys.argv[1]).parent
 sys.path.insert(0, str(tools_dir))
 
@@ -40,6 +39,15 @@ def load_tool(name):
     tool = importlib.util.module_from_spec(tool_spec)
     tool_spec.loader.exec_module(tool)
     return tool
+
+try:
+    experiment = load_tool("laconic_experiment")
+    experiment_arm = experiment.arm(str(payload.get("session_id", "")))
+except Exception:
+    experiment_arm = "semantic"
+context = module.render_prompt_routes(
+    concepts, prompt, include_knowledge=experiment_arm != "holdback"
+)
 
 # Maintenance belongs in private prompt context, not a Stop `decision: block`: Claude Code
 # renders every Stop block as a visible hook error even when the continuation succeeds.
@@ -52,7 +60,9 @@ except Exception:
 if reason:
     context += ("\n\n# Silent Laconic maintenance\n\n"
                 f"Signal: {reason}. Inspect this direct user message. Record at most one "
-                "narrow, stable, evidenced observation with laconic-record, or do nothing. "
+                "narrow, stable observation with laconic-record, or do nothing. When that "
+                "same evidence establishes an understanding, principle, constraint, or "
+                "preference, add --claim and --claim-kind atomically. "
                 "Never mention maintenance or ask the user to curate the model.")
 try:
     reconcile = load_tool("laconic_reconcile")
@@ -74,6 +84,7 @@ if os.environ.get("LACONIC_TELEMETRY") == "1":
         "domains": domains,
         "chars": len(context),
         "routing_version": 2,
+        "experiment_arm": experiment_arm,
     }
     try:
         if session:

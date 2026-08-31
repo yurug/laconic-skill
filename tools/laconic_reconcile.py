@@ -8,7 +8,7 @@ import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from laconic_index import days_since, effective_state, load_concepts
+from laconic_index import days_since, effective_state, load_concepts, select_knowledge_candidates
 
 DEFAULT_INTERVAL_DAYS = 30
 URGENT_CANDIDATE_COUNT = 3
@@ -20,7 +20,8 @@ def home():
 
 def findings(concepts, today=None):
     today = today or date.today()
-    out = {"stale": [], "expired": [], "contradictions": [], "undistilled": []}
+    out = {"stale": [], "expired": [], "contradictions": [], "undistilled": [],
+           "semantic": []}
     refs = {}
     for concept in concepts:
         cid = concept["id"]
@@ -66,11 +67,21 @@ def findings(concepts, today=None):
                 if pair not in seen:
                     seen.add(pair)
                     out["contradictions"].append({"capabilities": list(pair)})
+    out["semantic"] = [{"concept": item["id"], "evidence": item["index"],
+                        "kind": item["kind"]}
+                       for item in select_knowledge_candidates(concepts)]
     return out
 
 
 def count(result):
-    return sum(len(items) for items in result.values())
+    # The same strong observation can need both capability and semantic distillation. It is
+    # one lifecycle finding even though the report exposes both possible interpretations.
+    capability_keys = {(item["concept"], item["evidence"])
+                       for item in result.get("undistilled", ())}
+    semantic_only = [item for item in result.get("semantic", ())
+                     if (item["concept"], item["evidence"]) not in capability_keys]
+    return sum(len(items) for key, items in result.items() if key != "semantic") \
+        + len(semantic_only)
 
 
 def signature(result):
@@ -108,6 +119,7 @@ def begin(interval_days=DEFAULT_INTERVAL_DAYS):
         return 0
     current_signature = signature(result)
     urgent = (len(result["undistilled"]) >= URGENT_CANDIDATE_COUNT
+              or len(result["semantic"]) >= URGENT_CANDIDATE_COUNT
               or bool(result["contradictions"]))
     if not is_due(interval_days) and not (
         urgent and current_signature != reviewed_signature()
@@ -159,6 +171,9 @@ def render(result):
             f"- undistilled [{item['kind']}]: "
             f"{item['concept']} evidence #{item['evidence']}"
         )
+    for item in result["semantic"]:
+        lines.append(f"- semantic candidate [{item['kind']}]: "
+                     f"{item['concept']} evidence #{item['evidence']}")
     if len(lines) == 1:
         lines.append("- no lifecycle findings")
     lines.append(

@@ -101,7 +101,7 @@
   .states .s{flex:1 1 auto;text-align:center;font-family:var(--mono);font-size:.72rem;
     padding:.4em .3em;border-radius:6px;border:1px solid var(--faint);background:var(--card);cursor:pointer}
   .states .s.sel{border-color:var(--accent);background:var(--accent);color:#fff}
-  .correct input,.correct textarea{width:100%;font-family:var(--sans);font-size:.82rem;
+  .correct input,.correct textarea,.correct select{width:100%;font-family:var(--sans);font-size:.82rem;
     border:1px solid var(--faint);border-radius:6px;padding:.45em .6em;background:var(--card);color:var(--ink)}
   .correct .rowb{display:flex;gap:.4rem;justify-content:flex-end}
   .edit{display:none;gap:.4rem;margin-top:.3rem}
@@ -234,14 +234,31 @@ function evidenceItems(c,numbers){
 
 function claimCard(item){
   const {concept:c,claim:k}=item;
-  return `<article class="cardc">
+  return `<article class="cardc" data-id="${esc(c.id)}" data-claim-id="${esc(k.claim_id)}">
     <div class="claim-title">${esc(k.claim)}</div>
-    <div class="claim-meta">${esc(k.kind)} · ${esc(k.scope)}${k.condition?" · when "+esc(k.condition):""}</div>
+    <div class="claim-meta">${esc(k.kind)} · ${esc(k.scope)}${k.condition?" · when "+esc(k.condition):""}`+
+      `${k.confirmed?" · confirmed "+esc(k.confirmed):""}${k.retracted?" · retracted "+esc(k.retracted):""}</div>
     <div class="lbl">Why the model believes this</div>
     <ul class="why">${evidenceItems(c,k.evidence)}</ul>
     <details class="tech"><summary>Model location</summary>
       ${esc(c.label)} · ${esc(c.domain)} · internal id: ${esc(c.id)}
     </details>
+    <div class="actions">
+      <button class="link" data-act="claim-confirm">Confirm</button>
+      <button class="link" data-act="claim-edit">Reword / scope…</button>
+      <button class="link danger" data-act="claim-retract">Retract…</button>
+    </div>
+    <div class="correct claim-editor">
+      <textarea class="claim-text" rows="3">${esc(k.claim)}</textarea>
+      <div class="rowb">
+        <select class="claim-kind">${["understanding","principle","constraint","preference"].map(v=>`<option${v===k.kind?" selected":""}>${v}</option>`).join("")}</select>
+        <select class="claim-scope">${["project","domain","general"].map(v=>`<option${v===k.scope?" selected":""}>${v}</option>`).join("")}</select>
+      </div>
+      <input class="claim-condition" placeholder="condition (optional)" value="${esc(k.condition||"")}" />
+      <input class="claim-supersedes" placeholder="supersedes: concept/claim-id, …" value="${esc((k.supersedes||[]).join(", "))}" />
+      <input class="claim-contradicts" placeholder="contradicts: concept/claim-id, …" value="${esc((k.contradicts||[]).join(", "))}" />
+      <div class="rowb"><button data-act="claim-cancel">Cancel</button><button data-act="claim-save">Save correction</button></div>
+    </div>
   </article>`;
 }
 
@@ -352,7 +369,24 @@ document.addEventListener("click",async e=>{
   const cardEl=e.target.closest(".cardc");if(!cardEl)return;
   const id=cardEl.dataset.id, act=b.dataset.act;
   const cor=cardEl.querySelector(".correct"), ed=cardEl.querySelector(".edit");
-  if(act==="correct"){cor.classList.toggle("open");ed.classList.remove("open");}
+  if(act==="claim-confirm"){
+    await post("/api/claim",{id,claim_id:cardEl.dataset.claimId,action:"confirm"});
+  }else if(act==="claim-edit"){
+    cardEl.querySelector(".claim-editor").classList.toggle("open");
+  }else if(act==="claim-cancel"){
+    cardEl.querySelector(".claim-editor").classList.remove("open");
+  }else if(act==="claim-save"){
+    await post("/api/claim",{id,claim_id:cardEl.dataset.claimId,action:"edit",
+      claim:cardEl.querySelector(".claim-text").value.trim(),
+      kind:cardEl.querySelector(".claim-kind").value,
+      scope:cardEl.querySelector(".claim-scope").value,
+      condition:cardEl.querySelector(".claim-condition").value.trim(),
+      supersedes:cardEl.querySelector(".claim-supersedes").value.trim(),
+      contradicts:cardEl.querySelector(".claim-contradicts").value.trim()});
+  }else if(act==="claim-retract"){
+    const reason=prompt("Why is this claim wrong or obsolete?");
+    if(reason)await post("/api/claim",{id,claim_id:cardEl.dataset.claimId,action:"retract",reason});
+  }else if(act==="correct"){cor.classList.toggle("open");ed.classList.remove("open");}
   else if(act==="edit"){ed.classList.toggle("open");cor.classList.remove("open");}
   else if(act==="cancel-c"){cor.classList.remove("open");}
   else if(act==="save-c"){

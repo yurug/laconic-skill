@@ -31,6 +31,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from laconic_index import (  # noqa: E402
     STATES,
+    ESTABLISHED_KNOWLEDGE,
     atomic_write_text,
     parse_frontmatter,
     parse_capabilities,
@@ -44,6 +45,10 @@ from laconic_record import (  # noqa: E402
     ensure_repo,
     git_commit,
     git_push_async,
+    format_knowledge_claim,
+    parse_existing,
+    render as render_concept,
+    set_section,
 )
 
 UI_FILE = HERE / "console_ui.html"
@@ -282,6 +287,67 @@ def delete_concept(cid):
     return result.returncode == 0, (result.stdout + result.stderr).strip()
 
 
+def mutate_claim(cid, claim_id, action, payload):
+    """Negotiate one semantic assertion without changing unrelated concept state."""
+    if not ID_RE.fullmatch(cid) or not ID_RE.fullmatch(claim_id):
+        return False, "invalid concept or claim id"
+    if action not in {"confirm", "edit", "retract"}:
+        return False, "invalid claim action"
+    path = concepts_dir() / f"{cid}.md"
+    ensure_repo(home())
+    lock = acquire_model_lock(home())
+    if lock is None:
+        return False, "model is busy; retry"
+    try:
+        try:
+            meta, evidence, body = parse_existing(path)
+        except OSError as error:
+            return False, f"could not read claim: {error}"
+        if meta is None:
+            return False, "malformed concept"
+        claims = parse_knowledge_claims(body)
+        target = next((item for item in claims if item["claim_id"] == claim_id), None)
+        if target is None:
+            return False, f"no such claim: {cid}/{claim_id}"
+        today = date.today().isoformat()
+        if action == "confirm":
+            target["confirmed"] = today
+        elif action == "retract":
+            reason = str(payload.get("reason", "")).strip()
+            if not reason or any(char in reason for char in ("\n", "\r", "]")):
+                return False, "retraction needs a one-line reason without ']'"
+            target["retracted"], target["retraction_reason"] = today, reason
+        else:
+            for key, allowed in (("kind", set(("understanding", "principle", "constraint", "preference"))),
+                                 ("scope", set(("project", "domain", "general")))):
+                value = str(payload.get(key, target[key])).strip()
+                if value not in allowed:
+                    return False, f"invalid {key}"
+                target[key] = value
+            for key in ("claim", "condition"):
+                value = str(payload.get(key, target.get(key, ""))).strip()
+                if (key == "claim" and not value) or any(c in value for c in ("\n", "\r", "]")):
+                    return False, f"invalid {key}"
+                target[key] = value
+            known_refs = {f"{concept['id']}/{claim['claim_id']}"
+                          for concept in load_model() for claim in concept.get("knowledge", ())}
+            for key in ("supersedes", "contradicts"):
+                values = [value.strip() for value in str(payload.get(key, "")).split(",")
+                          if value.strip()]
+                if any(value not in known_refs or value == f"{cid}/{claim_id}" for value in values):
+                    return False, f"{key} contains an unknown or self reference"
+                target[key] = values
+        lines = [format_knowledge_claim(item) for item in claims]
+        body = set_section(body, ESTABLISHED_KNOWLEDGE, "\n".join(lines))
+        atomic_write_text(path, render_concept(meta, evidence, body))
+        write_index_file(today)
+        git_commit(home(), f"{cid}/{claim_id}: console {action}")
+    finally:
+        lock.close()
+    git_push_async(home())
+    return True, f"{action}ed {cid}/{claim_id}"
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # keep the console quiet
@@ -341,6 +407,8 @@ class Handler(BaseHTTPRequestHandler):
                 ok, msg = edit_metadata(body["id"], body.get("domain"), body.get("summary"))
             elif self.path == "/api/delete":
                 ok, msg = delete_concept(body["id"])
+            elif self.path == "/api/claim":
+                ok, msg = mutate_claim(body["id"], body["claim_id"], body["action"], body)
             else:
                 return self._send(404, json.dumps({"error": "not found"}))
         except KeyError as e:

@@ -108,6 +108,15 @@ or a single-token domain plus a distinct term from one of its concepts. Repeated
 for routing aliases; one occurrence is not evidence that injection would have improved the
 answer.
 
+Aliases are the only way to widen that vocabulary, and `laconic-record --alias` is the only
+way to write one. Routing folds accents and ligatures before splitting on ASCII word
+characters, so `sécurité` and `mise en œuvre` yield `securite` and `oeuvre` rather than the
+fragments `curit` and `uvre`; without that, no alias the lint accepts could ever match an
+accented prompt. Folding is applied to prompt and vocabulary alike, so an accented prompt
+matches an unaccented alias and the reverse. Matching stays exact otherwise: inflected forms
+are separate aliases, and a term that is ambiguous in the user's usage costs a wrong domain
+on every prompt that contains it.
+
 ### Periodic reconciliation
 
 At most once every 30 days, the prompt hook runs `laconic-reconcile --begin`. Private same-turn
@@ -189,6 +198,30 @@ Relevant claims are injected under a separate bounded budget. Constraints and pr
 rank before principles and understandings because violating them has the highest immediate
 cost. Omitted claims are counted explicitly, and the complete model remains available in the
 hierarchical indexes and concept files.
+
+Each claim has a stable id and may record confirmation, retraction with reason, `supersedes`,
+or `contradicts` relations. The console edits one claim without moving the concept state or
+rewriting unrelated claims. Retracted and superseded claims remain auditable but leave
+injection. `laconic-candidates --knowledge` lists strong direct evidence not cited by any
+semantic claim; periodic reconciliation brings accumulated candidates to the agent without
+turning evidence into an automatic assertion.
+
+### Structural reconciliation
+
+`laconic-structure audit --out audit.json` reports singleton domains, missing/broad project
+roots, and the domain distribution without changing the model. An agent or user writes an
+explicit hash-bound plan containing domain changes, project removal/replacement, concept
+renames, or merges. `review` renders that plan; `apply` requires the exact review id, stages
+all operations, remaps evidence indexes and graph references, runs lint, acquires the model
+lock, and commits atomically. Git retains the pre-merge files as historical recovery.
+
+### Local semantic holdback
+
+With separate `LACONIC_TELEMETRY=1` and `LACONIC_EXPERIMENT=1` consent, a content-free session
+hash assigns 20% of sessions to a holdback that omits only `Established knowledge` claims.
+Policy, states, capabilities, gaps, and routing remain active. `laconic-stats --experiment`
+compares answer length, redundant definitions, and explicit-correction signals and warns
+before 50 holdback turns. Assignment and logs contain no conversation text.
 
 For an existing model, migration uses the same workflow for every installation:
 

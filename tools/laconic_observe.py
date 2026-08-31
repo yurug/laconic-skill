@@ -22,6 +22,7 @@ installing a writing policy is not consent to behavioral measurement.
 """
 
 import json
+import hashlib
 import os
 import re
 import sys
@@ -30,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from laconic_index import get_section, load_concepts  # noqa: E402
+from laconic_experiment import arm as experiment_arm  # noqa: E402
 
 # States whose guidance differs from the no-model default of "explain it".
 DISCRIMINATING = {"verified", "familiar"}
@@ -131,7 +133,8 @@ def observe(transcript, session_id):
 
     return {
         "date": date.today().isoformat(),
-        "session": session_id,
+        "session": hashlib.sha256(session_id.encode()).hexdigest()[:20],
+        "experiment_arm": experiment_arm(session_id),
         "chars": len(text),
         "touched": touched,
         "discriminating": sum(

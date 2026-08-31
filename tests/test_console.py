@@ -11,6 +11,7 @@ from laconic_console import (
     delete_concept,
     edit_metadata,
     human_label,
+    mutate_claim,
     request_is_json,
     request_is_same_origin,
     read_concept,
@@ -93,6 +94,26 @@ class TestMutationIntegrity(ConsoleTestCase):
         concept = read_concept(self.path("thing"))
         self.assertEqual(concept["knowledge"][0]["claim"], "Treats it as an invariant")
         self.assertEqual(concept["knowledge"][0]["evidence"], [1])
+
+    def test_claim_can_be_confirmed_edited_and_retracted_individually(self):
+        self.create("thing", evidence="explained the invariant")
+        self.record("thing", "--claim", "Treats it as an invariant",
+                    "--claim-kind", "principle", "--claim-from", "1")
+        claim_id = read_concept(self.path("thing"))["knowledge"][0]["claim_id"]
+        ok, message = mutate_claim("thing", claim_id, "confirm", {})
+        self.assertTrue(ok, message)
+        ok, message = mutate_claim("thing", claim_id, "edit", {
+            "claim": "Treats this as a strict invariant", "kind": "constraint",
+            "scope": "domain", "condition": "while the cache is shared",
+        })
+        self.assertTrue(ok, message)
+        claim = read_concept(self.path("thing"))["knowledge"][0]
+        self.assertEqual(claim["claim"], "Treats this as a strict invariant")
+        self.assertTrue(claim["confirmed"])
+        ok, message = mutate_claim("thing", claim_id, "retract", {"reason": "no longer true"})
+        self.assertTrue(ok, message)
+        self.assertTrue(read_concept(self.path("thing"))["knowledge"][0]["retracted"])
+        self.assertEqual(self.lint("--quiet").code, 0)
 
     def test_read_exposes_established_capabilities(self):
         self.create(

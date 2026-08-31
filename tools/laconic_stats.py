@@ -79,7 +79,42 @@ def main():
         "--routing", action="store_true",
         help="report prompt routing frequency and context cost, then exit",
     )
+    ap.add_argument(
+        "--experiment", action="store_true",
+        help="compare opt-in semantic and assertion-holdback arms",
+    )
     args = ap.parse_args()
+
+    if args.experiment:
+        rows = load(home() / "telemetry.jsonl")
+        maintenance = load(home() / "maintenance-telemetry.jsonl")
+        if args.since:
+            rows = [row for row in rows if row.get("date", "") >= args.since]
+            maintenance = [row for row in maintenance if row.get("date", "") >= args.since]
+        arms = {name: [row for row in rows if row.get("experiment_arm") == name]
+                for name in ("semantic", "holdback")}
+        if not all(arms.values()):
+            print("experiment needs observations in both semantic and holdback arms")
+            return 0
+        print("Semantic-knowledge holdback experiment (content-free local metrics):")
+        for name, sample in arms.items():
+            touches = [touch for row in sample for touch in row.get("touched", [])]
+            applicable = [touch for touch in touches
+                          if touch.get("state") in ("verified", "familiar")
+                          and not touch.get("gap")]
+            redundant = sum(bool(touch.get("defined")) for touch in applicable)
+            corrections = sum(1 for row in maintenance
+                              if row.get("experiment_arm") == name
+                              and row.get("signal") == "explicit correction")
+            print(f"  {name}: {len(sample)} turns, mean answer "
+                  f"{sum(int(row.get('chars', 0)) for row in sample) / len(sample):.0f} chars")
+            print(f"    redundant definitions: {redundant}/{len(applicable)} applicable touches")
+            print(f"    explicit-correction signals: {corrections} "
+                  f"({100 * corrections / len(sample):.1f} per 100 turns)")
+        if len(arms["holdback"]) < 50:
+            print("\n  provisional: fewer than 50 holdback turns; do not infer an effect yet")
+        print("\nAssignment is stable per session. No prompt or response text is retained.")
+        return 0
 
     if args.routing:
         rows = load(home() / "routing-telemetry.jsonl")

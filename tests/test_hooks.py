@@ -9,6 +9,7 @@ import os
 import subprocess
 import time
 import unittest
+from unittest import mock
 
 from helpers import REPO, ModelTestCase
 from laconic_lint import INDEX_BUDGET
@@ -111,6 +112,20 @@ class TestInjectPolicy(HookTestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         json.loads(proc.stdout)
 
+    def test_opt_in_holdback_omits_semantic_claims_only(self):
+        self.create("thing", "--kind", "world", domain="testing", evidence="explained it")
+        self.record("thing", "--claim", "Understands the mechanism", "--claim-from", "1")
+        from laconic_experiment import arm
+        environment = self.env(LACONIC_TELEMETRY="1", LACONIC_EXPERIMENT="1")
+        with mock.patch.dict(os.environ, environment):
+            session = next(f"holdback-{i}" for i in range(100) if arm(f"holdback-{i}") == "holdback")
+        proc = self.hook(INJECT, "SessionStart", env=environment, payload=json.dumps({
+            "cwd": str(REPO), "session_id": session,
+        }))
+        context = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("thing", context)
+        self.assertNotIn("Understands the mechanism", context)
+
     def test_survives_garbage_stdin(self):
         """A broken hook would degrade every session, so it must never fail loudly."""
         proc = self.hook(INJECT, "SessionStart", payload="not json at all {{{")
@@ -181,6 +196,22 @@ class TestSubagentPolicy(HookTestCase):
 
 
 class TestPromptRouting(HookTestCase):
+    def test_holdback_also_omits_claims_from_prompt_routes(self):
+        self.create("thing", "--kind", "world", domain="testing", evidence="explained it")
+        self.record("thing", "--claim", "Understands the mechanism", "--claim-from", "1",
+                    "--claim-scope", "domain")
+        from laconic_experiment import arm
+        environment = self.env(LACONIC_TELEMETRY="1", LACONIC_EXPERIMENT="1")
+        with mock.patch.dict(os.environ, environment):
+            session = next(f"route-holdback-{i}" for i in range(100)
+                           if arm(f"route-holdback-{i}") == "holdback")
+        proc = self.hook(ROUTE, env=environment, payload=json.dumps({
+            "prompt": "Tell me about the testing thing", "session_id": session,
+        }))
+        context = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("thing", context)
+        self.assertNotIn("Understands the mechanism", context)
+
     def test_correction_requests_private_in_turn_maintenance(self):
         proc = self.hook(ROUTE, payload=json.dumps({
             "prompt": "Non, ce n'est pas le cache : cet invariant est nécessaire.",

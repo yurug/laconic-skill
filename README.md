@@ -46,6 +46,7 @@ depending on whether laconic is a plugin or a bare skill:
 ~/.laconic/bin/laconic-bootstrap  # prepare a consented transcript review bundle
 ~/.laconic/bin/laconic-migrate-v2 # reviewed migration to sourced semantic claims
 ~/.laconic/bin/laconic-structure  # hash-bound domain/project/concept reconciliation
+~/.laconic/bin/laconic-statusline # one status line for the Claude Code statusLine hook
 ~/.laconic/bin/laconic-review     # validate and render agent proposals; never apply them
 ~/.laconic/bin/laconic-review-web # review proposals and persist accept/reject decisions
 ~/.laconic/bin/laconic-apply-review # apply explicitly accepted proposals after preflight
@@ -57,6 +58,19 @@ consent and an external-privacy export; no bootstrap proposal writes the model b
 
 `laconic-status` answers the first question everyone asks: it reports what is installed, what
 the hooks fired, and how big the model has become.
+
+Because every hook is silent on success, a working install and an absent one look identical
+from the terminal. Two optional surfaces fix that. Point Claude Code's `statusLine` at
+`laconic-statusline` for a line carrying the concept count, the domains routed for the current
+prompt, and a warning when the running session predates the last config change — the policy is
+injected once at session start, so a long-lived session silently keeps the old one until you
+`/clear`. And `laconic-stats --digest [days]` summarises what the model learned over a period,
+including domains missed often enough to deserve an alias; run it from a weekly timer if you
+want it unprompted.
+
+```json
+"statusLine": { "type": "command", "command": "/home/you/.laconic/bin/laconic-statusline" }
+```
 
 Then just work. The model starts empty and accumulates evidence as the agent observes your
 work; nothing is promoted without a dated observation you can inspect. Ordinary routing,

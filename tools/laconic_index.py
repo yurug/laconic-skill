@@ -156,6 +156,7 @@ SHIMS = {
     "laconic-lint": "laconic_lint.py",
     "laconic-console": "laconic_console.py",
     "laconic-status": "laconic_status.py",
+    "laconic-statusline": "laconic_statusline.py",
     "laconic-stats": "laconic_stats.py",
     "laconic-candidates": "laconic_candidates.py",
     "laconic-bootstrap": "laconic_bootstrap.py",

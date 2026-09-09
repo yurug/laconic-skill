@@ -12,8 +12,11 @@ carrying a recorded gap, since a gap reinstates the explanation.
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
 from collections import Counter
+from datetime import date, timedelta
 from pathlib import Path
 
 
@@ -66,6 +69,80 @@ def evidence_kinds():
     return counts, per_concept, THEORY_KINDS
 
 
+def digest(days=7):
+    """A period summary of what the model learned, for someone who never opens ~/.laconic.
+
+    Deliberately not a dashboard. It answers three questions in the order they get asked:
+    did anything change, is routing reaching the right places, and is there one thing worth
+    my attention. Everything here is already recorded -- the model's own git log and the
+    routing telemetry -- so this reads rather than measures.
+    """
+    since = (date.today() - timedelta(days=days)).isoformat()
+    out = [f"# Laconic digest — {since} to {date.today().isoformat()}", ""]
+
+    changes = model_changes(since)
+    if changes:
+        out.append(f"## Learned ({len(changes)})")
+        out.append("")
+        out += [f"- {line}" for line in changes]
+    else:
+        out.append("## Learned")
+        out.append("")
+        out.append("Nothing recorded. A quiet period is a normal outcome, not a fault: "
+                   "evidence is only written when an observation is unambiguous.")
+    out.append("")
+
+    rows = [r for r in load(home() / "routing-telemetry.jsonl") if r.get("date", "") >= since]
+    out.append("## Routing")
+    out.append("")
+    if rows:
+        hit = sum(1 for r in rows if r.get("domains"))
+        selected = Counter(d for r in rows for d in r.get("domains") or [])
+        out.append(f"- {hit}/{len(rows)} prompts routed ({100 * hit / len(rows):.0f}%)")
+        if selected:
+            top = ", ".join(f"{d} {n}" for d, n in selected.most_common(5))
+            out.append(f"- most loaded: {top}")
+        missed = Counter(d for r in rows for d in r.get("missed_domains") or [])
+        # One miss is noise; the same domain missed repeatedly is the evidence an alias
+        # should be recorded from, which is the one action this digest exists to prompt.
+        repeated = [(d, n) for d, n in missed.most_common(5) if n >= 3]
+        if repeated:
+            out.append("- repeatedly missed, candidates for `laconic-record --alias`: "
+                       + ", ".join(f"{d} ({n}x)" for d, n in repeated))
+    else:
+        out.append("- no routing telemetry in this period "
+                   "(set LACONIC_TELEMETRY=1 to collect it)")
+    return "\n".join(out)
+
+
+def model_changes(since):
+    """State transitions and new concepts, read from the model repo's own commit log."""
+    model = home()
+    if not (model / ".git").is_dir() or not shutil.which("git"):
+        return []
+    try:
+        result = subprocess.run(
+            ["git", "log", f"--since={since}", "--pretty=%s"],
+            cwd=model, capture_output=True, text=True, check=False, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    lines = []
+    for subject in result.stdout.splitlines():
+        # The recorder writes "<concept>: <prior> -> <final> — <evidence>" for an
+        # observation and "<concept>: distilled (...)" for a distillation. Only the first
+        # is a change in what the model claims; distillations restate what is already there.
+        if ":" not in subject or " -> " not in subject:
+            continue
+        concept, _, rest = subject.partition(":")
+        transition = rest.split("—")[0].strip()
+        prior, _, final = transition.partition(" -> ")
+        if prior.strip() == final.strip():
+            continue
+        lines.append(f"`{concept.strip()}` {prior.strip()} → {final.strip()}")
+    return lines
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--log", default=None)
@@ -83,7 +160,15 @@ def main():
         "--experiment", action="store_true",
         help="compare opt-in semantic and assertion-holdback arms",
     )
+    ap.add_argument(
+        "--digest", nargs="?", const=7, type=int, metavar="DAYS",
+        help="what the model learned over the last DAYS (default 7), for periodic review",
+    )
     args = ap.parse_args()
+
+    if args.digest:
+        print(digest(args.digest))
+        return 0
 
     if args.experiment:
         rows = load(home() / "telemetry.jsonl")

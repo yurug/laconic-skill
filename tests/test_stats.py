@@ -38,3 +38,63 @@ class StatsTest(ModelTestCase):
         self.assertIn("'rocq': 1", result.out)
         self.assertIn("1/1 (100.0%)", result.out)
         self.assertIn("possible missed domains: {'databases': 1}", result.out)
+
+
+class TestDigest(ModelTestCase):
+    """The digest is read by someone who never opens ~/.laconic, so a quiet week must
+    read as a quiet week and not as a broken tool."""
+
+    def digest(self, days=7):
+        import laconic_stats
+        from unittest import mock
+        with mock.patch.object(laconic_stats, "home", return_value=self.home):
+            return laconic_stats.digest(days)
+
+    def route_row(self, when, domains, missed=()):
+        with (self.home / "routing-telemetry.jsonl").open("a", encoding="utf-8") as h:
+            h.write(json.dumps({"date": when, "domains": list(domains),
+                                "missed_domains": list(missed)}) + "\n")
+
+    def test_empty_model_says_so_without_alarm(self):
+        out = self.digest()
+        self.assertIn("Nothing recorded", out)
+        self.assertIn("normal outcome", out)
+
+    def test_reports_routing_rate(self):
+        from datetime import date
+        today = date.today().isoformat()
+        self.route_row(today, ["laconic"])
+        self.route_row(today, [])
+        self.assertIn("1/2 prompts routed (50%)", self.digest())
+
+    def test_surfaces_repeated_misses_as_alias_candidates(self):
+        """One miss is noise. The threshold is what makes this actionable rather than a
+        list of everything the router ever failed to select."""
+        from datetime import date
+        today = date.today().isoformat()
+        for _ in range(3):
+            self.route_row(today, ["laconic"], missed=["writing"])
+        self.route_row(today, ["laconic"], missed=["one-off"])
+        out = self.digest()
+        self.assertIn("writing (3x)", out)
+        self.assertNotIn("one-off", out)
+
+    def test_ignores_rows_outside_the_window(self):
+        self.route_row("2020-01-01", ["ancient"])
+        self.assertIn("no routing telemetry", self.digest())
+
+    def test_distillations_are_not_reported_as_learning(self):
+        """A distillation restates existing evidence; counting it would inflate the one
+        number the reader uses to judge whether anything happened."""
+        import laconic_stats
+        from unittest import mock
+        (self.home / ".git").mkdir()
+        with mock.patch.object(laconic_stats, "home", return_value=self.home), \
+             mock.patch.object(laconic_stats.subprocess, "run") as run:
+            run.return_value = mock.Mock(stdout=(
+                "thing: distilled (exposed, 2 observations)\n"
+                "other: exposed -> familiar — [world] saw it\n"
+                "same: familiar -> familiar — [term] again\n"
+            ))
+            changes = laconic_stats.model_changes("2026-01-01")
+        self.assertEqual(changes, ["`other` exposed → familiar"])

@@ -149,7 +149,7 @@ Laconic is the first working piece of *engineer engineering*, the fourth discipl
 the persistent model at the centre of the loop, the one the other activities consult so that
 the human who signs off still understands what they are signing. It is usable on its own, and
 it is also the component
-[agentic-loop-kit](https://github.com/yurug/agentic-loop-kit) leans on for calibration.
+[Socrask](https://github.com/yurug/socrask) leans on for calibration.
 
 For the file format, the four knowledge states, the promotion ladder, and the lint rules, see
 [`docs/knowledge-model.md`](docs/knowledge-model.md).
